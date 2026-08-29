@@ -1,0 +1,26 @@
+# Run after domcloud.initial.yml and after creating ~/.config/dom_ims.env.
+# This is also suitable for DOM Cloud's GitHub webhook deployment task.
+features:
+  - node 24
+  - postgresql
+
+nginx:
+  root: public_html/public
+  passenger:
+    enabled: on
+    app_env: production
+    app_start_command: env PORT=$PORT npm start
+  locations:
+    - match: /_next/static/
+      alias: public_html/.next/static/
+
+commands:
+  - git pull --ff-only
+  - test -f "$HOME/.config/dom_ims.env"
+  - ln -sfn "$HOME/.config/dom_ims.env" .env.local
+  - mkdir -p public
+  - npm ci
+  - npm run db:deploy
+  - npm run build
+  - npm prune --omit=dev
+  - restart

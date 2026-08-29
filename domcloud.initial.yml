@@ -1,0 +1,24 @@
+# First deployment only. Replace the GitHub URL before pasting this into
+# DOM Cloud's Setup -> Deploy page. For a private repository, use DOM Cloud's
+# read-only deploy-key flow.
+source:
+  url: ssh://git@github.com/YOUR_GITHUB_USER/YOUR_REPOSITORY.git
+  branch: main
+  depth: shallow
+
+features:
+  - node 24
+  - postgresql
+
+nginx:
+  root: public_html/public
+  passenger:
+    enabled: on
+    app_env: production
+    app_start_command: env PORT=$PORT npm start
+  locations:
+    - match: /_next/static/
+      alias: public_html/.next/static/
+
+commands:
+  - mkdir -p public

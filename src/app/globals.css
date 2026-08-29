@@ -1,0 +1,1478 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens.
+
+   The visual language is borrowed from the thing being counted: the spec plate
+   on the back of a device. Anodized grey field, etched dark text, identifiers
+   and money in tabular mono so an IMEI can be read digit-by-digit at a counter.
+
+   Status colours are load-bearing, not decorative — a shop owner should be able
+   to see "low stock" from across the room without reading the number.
+--------------------------------------------------------------------------- */
+
+@theme {
+  --color-ink: #111820; /* primary text */
+  --color-graphite: #46535f; /* accessible secondary text */
+  --color-plate: #e5e9ec; /* application canvas */
+  --color-card: #ffffff;
+  --color-rule: #bfc7ce;
+  --color-rule-soft: #d9dee2;
+
+  /* Sidebar-specific semantic tokens. A future dark theme can replace these
+     values without changing navigation component classes. */
+  --color-sidebar: #fbfcfd;
+  --color-sidebar-text: #27333e;
+  --color-sidebar-muted: #44525f;
+  --color-sidebar-border: #b8c1c9;
+  --color-sidebar-hover: #e8edf1;
+  --color-sidebar-active: #e3e8ff;
+  --color-sidebar-active-text: #2039bd;
+  --color-sidebar-active-border: #8798ec;
+  --color-sidebar-section-text: #17212a;
+  --color-scrollbar-thumb: rgba(70, 83, 95, 0.2);
+  --color-scrollbar-thumb-active: rgba(39, 51, 62, 0.72);
+
+  --color-signal: #2e4bd8; /* the one accent. primary actions only. */
+  --color-signal-wash: #eef1fe;
+
+  --color-ok: #1b7f5c;
+  --color-ok-wash: #e6f3ee;
+  --color-low: #a8620a; /* below reorder point */
+  --color-low-wash: #fbf0e2;
+  --color-out: #b3261e; /* zero */
+  --color-out-wash: #fbeae9;
+
+  /* Dashboard metric identities. Kept separate from operational statuses so
+     every KPI remains recognizable without recoloring other components. */
+  --color-metric-units: #14181d;
+  --color-metric-units-wash: #f1f3f4;
+  --color-metric-low: #a16207;
+  --color-metric-low-wash: #fff7e6;
+  --color-metric-stock: #4338ca;
+  --color-metric-stock-wash: #eeefff;
+  --color-metric-margin: #0f766e;
+  --color-metric-margin-wash: #e8f7f5;
+  --color-metric-margin-loss: #9f1239;
+  --color-metric-margin-loss-wash: #fce7ef;
+  --color-metric-revenue: #0369a1;
+  --color-metric-revenue-wash: #eaf5fb;
+  --color-metric-cogs: #c2410c;
+  --color-metric-cogs-wash: #fff0e8;
+  --color-metric-internal-use: #be185d;
+  --color-metric-internal-use-wash: #fce7f3;
+  --color-metric-profit: #15803d;
+  --color-metric-profit-wash: #eaf7ee;
+  --color-metric-profit-loss: #b3261e;
+  --color-metric-profit-loss-wash: #fbeae9;
+  --color-metric-neutral: #626c76;
+  --color-metric-neutral-wash: #f1f3f4;
+
+  --font-sans:
+    "IBM Plex Sans", "Noto Sans Bengali", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+
+  --radius-plate: 3px; /* hardware, not marshmallow */
+}
+
+/* Explicit semantic rules keep this newly introduced KPI visible immediately
+   in development as well as production. Tailwind's dev scanner can otherwise
+   retain an older utility set until the dev process is restarted. */
+.dashboard-kpi-internal-use-border {
+  border-top-color: var(--color-metric-internal-use);
+}
+
+.dashboard-kpi-internal-use-wash {
+  background-color: var(--color-metric-internal-use-wash);
+}
+
+.dashboard-kpi-internal-use-text {
+  color: var(--color-metric-internal-use);
+}
+
+html {
+  background: var(--color-plate);
+  scrollbar-gutter: stable;
+}
+
+html::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+html::-webkit-scrollbar-track,
+html::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+html::-webkit-scrollbar-thumb {
+  min-height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+html:hover::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+html::-webkit-scrollbar-thumb:hover {
+  border-width: 0 1px 1px 0;
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+body {
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+html[lang="bn"] body {
+  font-family:
+    "Noto Sans Bengali", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+}
+
+html[lang="bn"] .eyebrow {
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+
+/* Every identifier and every amount is tabular. Columns must align. */
+.tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Small-caps field labels, as on a regulatory sticker. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--color-graphite);
+}
+
+.sidebar-section-label {
+  color: var(--color-sidebar-section-text);
+  font-weight: 800;
+}
+
+.navigation-links .sidebar-section-label:not(:first-child) {
+  margin-top: 0.4rem;
+  border-top: 1px solid var(--color-sidebar-border);
+  padding-top: 0.4rem;
+}
+
+/* Like YouTube, internal scrollbars reserve a stable 4px hit area without
+   moving content. They are hidden outside the container, draw a 2px thumb while
+   the container is hovered/focused, and draw a 3px thumb on direct hover. */
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+) {
+  scrollbar-gutter: stable;
+}
+
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+)::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+)::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+)::-webkit-scrollbar-track,
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+)::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+:where(
+  .overflow-auto,
+  .overflow-y-auto,
+  .overflow-x-auto,
+  .overflow-y-scroll,
+  .overflow-x-scroll,
+  .invoice-preview-viewport,
+  .emi-receipt-viewport
+)::-webkit-scrollbar-thumb {
+  min-height: 28px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  background-clip: padding-box;
+}
+
+/* Long document previews must advertise that more content is available even
+   before the user clicks or hovers them. Keep the normal thumb subtle; the
+   shared hover rule below still strengthens it during interaction. */
+.scrollbar-hint::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb);
+}
+
+:where(
+    .overflow-auto,
+    .overflow-y-auto,
+    .overflow-x-auto,
+    .overflow-y-scroll,
+    .overflow-x-scroll,
+    .invoice-preview-viewport,
+    .emi-receipt-viewport
+  ):is(:hover, :focus-visible)::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+:where(
+    .overflow-auto,
+    .overflow-y-auto,
+    .overflow-x-auto,
+    .overflow-y-scroll,
+    .overflow-x-scroll,
+    .invoice-preview-viewport,
+    .emi-receipt-viewport
+  )::-webkit-scrollbar-thumb:hover {
+  border-width: 0 1px 1px 0;
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+/* The sidebar's scroll owner is its inner nav. Reveal its thumb when the
+   pointer is anywhere inside the complete sidebar, including its fixed header
+   and account footer. */
+.desktop-sidebar:hover > nav::-webkit-scrollbar-thumb,
+.desktop-sidebar:has(:focus-visible) > nav::-webkit-scrollbar-thumb,
+.mobile-navigation-panel:hover > nav::-webkit-scrollbar-thumb,
+.mobile-navigation-panel:has(:focus-visible) > nav::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+/* Shared table viewports must react to pointer hover without first receiving
+   keyboard focus. Keep this explicit because their surrounding card header is
+   not the element that owns the scrollbar. */
+.contextual-scroll-area.scrollbar-active::-webkit-scrollbar-thumb,
+.contextual-scroll-area:focus-visible::-webkit-scrollbar-thumb {
+  border-width: 1px;
+  background-color: var(--color-scrollbar-thumb-active);
+}
+
+.contextual-scroll-area.scrollbar-active::-webkit-scrollbar-thumb:hover,
+.contextual-scroll-area:focus-visible::-webkit-scrollbar-thumb:hover {
+  border-width: 0 1px 1px 0;
+}
+
+/* Firefox does not expose WebKit scrollbar pseudo-elements. Its only reliable
+   fallback is the browser-provided thin scrollbar. */
+@supports not selector(::-webkit-scrollbar) {
+  :where(
+    html,
+    .overflow-auto,
+    .overflow-y-auto,
+    .overflow-x-auto,
+    .overflow-y-scroll,
+    .overflow-x-scroll,
+    .invoice-preview-viewport,
+    .emi-receipt-viewport
+  ) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar-thumb-active) transparent;
+  }
+}
+
+/* The fixed desktop sidebar is viewed at a greater distance than the mobile
+   drawer, so give its navigation and account copy one extra size step. */
+@media screen and (min-width: 768px) {
+  .desktop-navigation a {
+    font-size: 15px;
+    line-height: 1.4;
+  }
+
+  .desktop-navigation .eyebrow {
+    font-size: 12px;
+  }
+
+  .desktop-sidebar > div:first-child > a > span:first-child {
+    font-size: 14px;
+  }
+
+  .desktop-sidebar > div:last-child > p {
+    font-size: 13px;
+  }
+
+  .desktop-sidebar > div:last-child button {
+    font-size: 12px;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-signal);
+  outline-offset: 2px;
+}
+
+/* The command search has a permanent high-contrast field boundary. Avoid
+   stacking the global focus outline on top of that border. */
+.command-search-input:focus,
+.command-search-input:focus-visible,
+.customer-combobox-input:focus,
+.customer-combobox-input:focus-visible,
+.checkout-item-combobox-input:focus,
+.checkout-item-combobox-input:focus-visible,
+.label-product-combobox-input:focus,
+.label-product-combobox-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Wide displays expose more content at once, so slightly increase application
+   copy without scaling layout dimensions or physically sized print output. */
+@media screen and (min-width: 1440px) {
+  .dashboard-content .eyebrow,
+  .dashboard-content [class~="text-[10px]"] {
+    font-size: 11px;
+    line-height: 1.45;
+  }
+
+  .dashboard-content [class~="text-[11px]"] {
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .dashboard-content [class~="text-[12px]"] {
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .dashboard-content [class~="text-[13px]"] {
+    font-size: 14px;
+    line-height: 1.4;
+  }
+
+  .dashboard-content [class~="text-[14px]"] {
+    font-size: 15px;
+  }
+
+  .dashboard-content [class~="text-[16px]"] {
+    font-size: 17px;
+  }
+
+  .dashboard-content [class~="text-[17px]"] {
+    font-size: 18px;
+  }
+
+  .dashboard-content [class~="text-[18px]"] {
+    font-size: 20px;
+  }
+
+  .dashboard-content [class~="text-[20px]"] {
+    font-size: 22px;
+  }
+
+  .dashboard-content [class~="text-[22px]"] {
+    font-size: 24px;
+  }
+
+  .dashboard-content .recharts-cartesian-axis-tick-value {
+    font-size: 11px;
+  }
+
+  .dashboard-content .recharts-legend-item-text {
+    font-size: 12px;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Stock labels. Dimensions are physical: each label is exactly 38 × 25 mm.
+   The screen preview shares the print component so the barcode and copy count
+   cannot drift from the output.
+--------------------------------------------------------------------------- */
+
+.label-print-area {
+  display: none;
+}
+
+.label-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 38mm);
+  gap: 3mm;
+  min-width: max-content;
+}
+
+.stock-label {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: 38mm;
+  height: 25mm;
+  overflow: hidden;
+  border: 0.2mm solid #b8b8b8;
+  background: #fff;
+  padding: 1.2mm 1.5mm 1mm;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.05;
+}
+
+.stock-label-heading {
+  min-width: 0;
+}
+
+.stock-label-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 6pt;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.stock-label-meta {
+  min-width: 0;
+  overflow: hidden;
+  padding-top: 0.5mm;
+  font-size: 5.2pt;
+  white-space: nowrap;
+}
+
+.stock-label-meta > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stock-label-bars {
+  /* Give Code 128 the full media width. Keeping it inside the label's text
+     padding compressed narrow modules to fractional dots at 203 DPI, which
+     made otherwise valid barcodes difficult or impossible to scan. The SVG's
+     built-in quiet zones still keep bars away from the physical edges. */
+  width: calc(100% + 3mm);
+  min-height: 10mm;
+  margin-inline: -1.5mm;
+  padding-top: 0.8mm;
+}
+
+.stock-label-code {
+  overflow: hidden;
+  padding-top: 0.35mm;
+  font-size: 6pt;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@page label-thermal {
+  size: 38mm 25mm;
+  margin: 0;
+}
+
+@page label-a4 {
+  size: A4 portrait;
+  margin: 5mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  /* Remove dashboard sizing/scroll containers from label pagination. Without
+     this, Chrome creates a second blank 38 × 25 mm sheet for the hidden shell. */
+  html:has(.stock-label-print-root),
+  body:has(.stock-label-print-root) {
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+  }
+
+  html:has(.stock-label-print-root[data-layout="thermal"]),
+  body:has(.stock-label-print-root[data-layout="thermal"]) {
+    /* Keep the entire print document in the same named page context. If only
+       the article owns label-thermal, Chromium can append an empty default
+       portrait page after the final landscape label. */
+    page: label-thermal;
+  }
+
+  body:has(.stock-label-print-root) .min-h-screen,
+  body:has(.stock-label-print-root) .min-h-screen > div,
+  body:has(.stock-label-print-root) main,
+  body:has(.stock-label-print-root) .dashboard-content {
+    display: contents !important;
+  }
+
+  .label-screen-only {
+    display: none !important;
+  }
+
+  .stock-label-print-root[data-layout="thermal"],
+  .stock-label-print-root[data-layout="thermal"] .label-print-area,
+  .stock-label-print-root[data-layout="thermal"] .label-print-grid {
+    /* Only the label itself may contribute a box to thermal pagination.
+       Chromium otherwise assigns the residual wrapper box a blank final page. */
+    display: contents !important;
+  }
+
+  .stock-label-print-root[data-layout="thermal"] .stock-label {
+    /* Leave a two-printer-dot rounding allowance inside the 25 mm page.
+       An exact 25 mm element can overflow the browser's fractional page box
+       and create one blank sheet after the final label. */
+    height: 24.8mm;
+    break-inside: avoid-page;
+    border: 0;
+  }
+
+  .stock-label-print-root[data-layout="thermal"] .stock-label + .stock-label {
+    break-before: page;
+  }
+
+  .stock-label-print-root[data-layout="a4"] .label-print-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 38mm);
+    width: 190mm;
+    page: label-a4;
+  }
+
+  .stock-label-print-root[data-layout="a4"] .label-print-area {
+    display: block;
+  }
+
+  .stock-label-print-root[data-layout="a4"] .stock-label {
+    break-inside: avoid;
+  }
+}
+
+/* EMI installment receipt preview and A4 / 80 mm POS printing. */
+.emi-receipt-viewport {
+  width: 100%;
+  max-height: calc(100dvh - 11rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.emi-receipt-document {
+  box-sizing: border-box;
+  width: min(210mm, 100%);
+  min-height: 180mm;
+  margin: 0 auto;
+  border: 1px solid var(--color-rule);
+  border-radius: 3px;
+  background: #fff;
+  padding: clamp(20px, 5%, 15mm);
+  color: #14181d;
+}
+
+.emi-receipt-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10mm;
+  border-bottom: 1px solid #4b5563;
+  padding-bottom: 5mm;
+}
+
+.emi-receipt-header h2 {
+  margin-top: 1mm;
+  color: #4b5563;
+  font-size: 10pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.emi-receipt-shop-logo {
+  display: block;
+  width: 30mm !important;
+  max-width: 30mm !important;
+  height: auto !important;
+  object-fit: contain;
+}
+
+.emi-receipt-number {
+  margin-top: 5mm;
+  font-family: var(--font-mono), monospace;
+  font-weight: 700;
+}
+
+.emi-receipt-header p:last-child {
+  margin-top: 1mm;
+  color: #4b5563;
+  font-size: 9pt;
+}
+
+.emi-receipt-qr-wrap {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: center;
+  gap: 1mm;
+}
+
+.emi-receipt-qr-wrap span {
+  color: #6b7280;
+  font-size: 7pt;
+}
+
+.emi-receipt-amount {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 6mm;
+  border: 1px solid #d1d5db;
+  background: #d1d5db;
+}
+
+.emi-receipt-amount > div {
+  display: grid;
+  gap: 1.5mm;
+  background: #f3f4f6;
+  padding: 4mm;
+}
+
+.emi-receipt-amount span,
+.emi-receipt-details dt {
+  color: #4b5563;
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.emi-receipt-amount strong {
+  font-family: var(--font-mono), monospace;
+  font-size: 17pt;
+}
+
+.emi-receipt-details {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5mm 10mm;
+  padding: 6mm 0;
+}
+
+.emi-receipt-details dd {
+  margin-top: 1.5mm;
+  font-size: 10pt;
+  font-weight: 550;
+}
+
+.emi-receipt-details dd span {
+  color: #4b5563;
+  font-weight: 400;
+}
+
+.emi-receipt-products {
+  border-block: 1px solid #d1d5db;
+  padding: 4mm 0;
+}
+
+.emi-receipt-products h3 {
+  margin-bottom: 2mm;
+  color: #374151;
+  font-size: 8pt;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.emi-receipt-products > div + div {
+  margin-top: 2mm;
+}
+
+.emi-receipt-products strong,
+.emi-receipt-products span {
+  display: block;
+}
+
+.emi-receipt-products span {
+  margin-top: 0.5mm;
+  color: #4b5563;
+  font-size: 8pt;
+}
+
+.emi-receipt-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 5mm;
+  margin-top: 5mm;
+  color: #4b5563;
+  font-size: 8pt;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-document {
+  display: flex;
+  flex-direction: column;
+  width: min(var(--emi-thermal-width, 80mm), 100%);
+  min-height: 0;
+  padding: 0 4mm 4mm;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 8pt;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.emi-receipt-root[data-layout="thermal"] :is(
+  .emi-receipt-header h2,
+  .emi-receipt-header p:last-child,
+  .emi-receipt-amount span,
+  .emi-receipt-details dt,
+  .emi-receipt-details dd span,
+  .emi-receipt-products h3,
+  .emi-receipt-products span,
+  .emi-receipt-footer
+) {
+  color: #000;
+}
+
+.emi-receipt-root[data-layout="thermal"] :is(
+  .emi-receipt-details dd,
+  .emi-receipt-details dd span,
+  .emi-receipt-products span,
+  .emi-receipt-footer
+) {
+  font-weight: 400;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-header {
+  display: contents;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-header > div:first-child {
+  order: 1;
+  border-bottom: 1px solid #4b5563;
+  padding-bottom: 3mm;
+  text-align: center;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-shop-logo {
+  width: 24mm !important;
+  max-width: 24mm !important;
+  margin-inline: auto;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-number {
+  margin-top: 3mm;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-qr-wrap {
+  order: 6;
+  margin-top: 4mm;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-qr {
+  width: 25mm;
+  height: 25mm;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-amount,
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-details {
+  grid-template-columns: 1fr;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-amount {
+  order: 2;
+  margin-top: 3mm;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-amount > div {
+  padding: 2.5mm;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-amount strong {
+  font-size: 14pt;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-details {
+  order: 3;
+  gap: 3mm;
+  padding: 3mm 0;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-details dd {
+  font-size: 8pt;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-footer {
+  order: 5;
+  display: grid;
+  gap: 1mm;
+  margin-top: 3mm;
+  text-align: left;
+}
+
+.emi-receipt-root[data-layout="thermal"] .emi-receipt-products {
+  order: 4;
+}
+
+@media print {
+  html:has(.emi-receipt-root),
+  body:has(.emi-receipt-root) {
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+  }
+
+  body:has(.emi-receipt-root) .min-h-screen,
+  body:has(.emi-receipt-root) .min-h-screen > div,
+  body:has(.emi-receipt-root) main,
+  body:has(.emi-receipt-root) .dashboard-content,
+  body:has(.emi-receipt-root) .emi-receipt-viewport {
+    display: contents !important;
+  }
+
+  .emi-receipt-root > header {
+    display: none;
+  }
+
+  .emi-receipt-root {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    break-after: avoid-page;
+  }
+
+  .emi-receipt-viewport {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .emi-receipt-root[data-layout="a4"] .emi-receipt-document {
+    width: 210mm;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding: 15mm;
+    page: auto;
+  }
+
+  .emi-receipt-root[data-layout="thermal"] {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    page: auto;
+  }
+
+  .emi-receipt-root[data-layout="thermal"] .emi-receipt-document {
+    width: var(--emi-thermal-width, 80mm);
+    max-width: var(--emi-thermal-width, 80mm);
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    padding: 0 0 4mm;
+    page: auto;
+    break-inside: avoid-page;
+    break-after: avoid-page;
+  }
+
+  .emi-receipt-root[data-layout="thermal"] .emi-receipt-shop-logo {
+    clip-path: inset(12.5% 0);
+    margin-top: -2mm;
+    margin-bottom: -2mm;
+  }
+
+}
+
+/* Phase 8 immutable invoice preview/printing. */
+.invoice-root {
+  container: invoice-preview / inline-size;
+}
+
+.invoice-preview-viewport {
+  width: 100%;
+  max-height: calc(100dvh - 12rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.invoice-document {
+  box-sizing: border-box;
+  width: min(210mm, 100%);
+  min-height: 0;
+  aspect-ratio: 210 / 297;
+  margin: 0 auto;
+  border: 1px solid var(--color-rule);
+  background: #fff;
+  padding: clamp(16px, 5%, 15mm);
+  color: #14181d;
+  font-size: 10pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-document {
+  width: min(var(--invoice-thermal-width, 80mm), 100%);
+  min-height: 0;
+  aspect-ratio: auto;
+  padding: 0 4mm 4mm;
+  color: #000;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 8pt;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-document .tnum {
+  font-family: Arial, Helvetica, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+/* The collection panel is screen UI, not part of the selected print document.
+   Its amounts must retain the application typography across every layout. */
+.invoice-root .invoice-payment-collection .tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-title > .tnum {
+  font-size: 9pt;
+  font-weight: 400;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-meta strong,
+.invoice-root[data-layout="thermal"] .invoice-meta p {
+  font-size: 8.5pt;
+  font-weight: 400;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items td:first-child span,
+.invoice-root[data-layout="thermal"] .invoice-summary dl > div:not(.invoice-total) {
+  font-weight: 400;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-summary dl > div:not(.invoice-total) {
+  font-size: 8.5pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items td:first-child strong,
+.invoice-root[data-layout="thermal"] .invoice-items td:nth-child(2) {
+  font-weight: 700;
+}
+
+.invoice-root[data-layout="thermal"] :is(
+  .invoice-header p,
+  .invoice-meta p,
+  .invoice-meta span,
+  .invoice-items td:first-child span,
+  .invoice-trade-in span,
+  .invoice-trade-in p,
+  .invoice-payment span,
+  footer
+) {
+  color: #000;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-header {
+  border-bottom-width: 0.2mm;
+  border-bottom-color: #000;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items td {
+  border-color: #000;
+  border-width: 0;
+  border-bottom-width: 0.12mm;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items th {
+  border: 0;
+  border-bottom: 0.12mm solid #d5dade;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-payment-badge,
+.invoice-root[data-layout="thermal"] .invoice-trade-in {
+  border: 0.12mm solid #000;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-payment {
+  border: 0;
+  border-top: 0.12mm solid #000;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-summary .invoice-total {
+  border-top-width: 0.2mm;
+  border-top-color: #000;
+}
+
+.invoice-header,
+.invoice-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8mm;
+}
+
+.invoice-header {
+  align-items: flex-start;
+  border-bottom: 0.4mm solid #14181d;
+  padding-bottom: 5mm;
+}
+
+.invoice-shop-brand {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.invoice-shop-logo {
+  display: block;
+  width: 34mm;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+}
+
+.invoice-header h1 {
+  font-size: 20pt;
+  font-weight: 700;
+}
+
+.invoice-header p,
+.invoice-meta p {
+  margin-top: 1mm;
+  color: #374151;
+}
+
+.invoice-title {
+  display: grid;
+  justify-items: end;
+  gap: 1.5mm;
+}
+
+.invoice-title strong {
+  font-size: 18pt;
+}
+
+.invoice-payment-badge {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 26mm;
+  margin-top: 1mm;
+  border: 0.2mm solid #c7cdd3;
+  border-radius: 0.8mm;
+  background: #f3f4f6;
+  padding: 1.2mm 2.5mm;
+  color: #14181d;
+  font-size: 8.5pt;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.invoice-root:has(.invoice-void-details) .invoice-title strong,
+.invoice-void-details {
+  color: #b42318;
+}
+
+.invoice-meta {
+  padding: 6mm 0;
+}
+
+.invoice-meta > div {
+  width: 48%;
+}
+
+.invoice-meta span,
+.invoice-payment span {
+  display: block;
+  margin-bottom: 1mm;
+  color: #374151;
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.invoice-meta strong {
+  display: block;
+}
+
+.invoice-items {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.invoice-items th,
+.invoice-items td {
+  border-bottom: 0.2mm solid #d5dade;
+  padding: 2.5mm 2mm;
+  text-align: right;
+  vertical-align: top;
+}
+
+.invoice-items th {
+  background: #e9ecee;
+  font-size: 7pt;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.invoice-items th:first-child,
+.invoice-items td:first-child {
+  text-align: left;
+}
+
+.invoice-items td:first-child strong,
+.invoice-items td:first-child span {
+  display: block;
+}
+
+.invoice-items td:first-child span {
+  margin-top: 1mm;
+  color: #374151;
+  font-size: 8pt;
+}
+
+.invoice-summary {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 5mm;
+}
+
+.invoice-trade-in {
+  margin-top: 4mm;
+  border: 0.2mm solid #d5dade;
+  padding: 3mm;
+}
+
+.invoice-trade-in span {
+  display: block;
+  margin-bottom: 1mm;
+  color: #374151;
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.invoice-trade-in strong,
+.invoice-trade-in p {
+  display: block;
+}
+
+.invoice-trade-in p {
+  margin-top: 1mm;
+  color: #374151;
+  font-size: 8pt;
+}
+
+.invoice-summary dl {
+  width: 72mm;
+}
+
+.invoice-summary dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 5mm;
+  padding: 1.5mm 0;
+}
+
+.invoice-summary .invoice-total {
+  margin-top: 1mm;
+  border-top: 0.4mm solid #14181d;
+  font-size: 14pt;
+  font-weight: 700;
+}
+
+.invoice-payment {
+  margin-top: 7mm;
+  border-top: 0.2mm solid #d5dade;
+  padding-top: 4mm;
+}
+
+.invoice-payment p + p {
+  margin-top: 3mm;
+}
+
+.invoice-document footer {
+  margin-top: 12mm;
+  color: #374151;
+  font-size: 8pt;
+}
+
+.invoice-document footer p + p {
+  margin-top: 2mm;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-header {
+  display: block;
+  text-align: center;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-shop-brand {
+  align-items: center;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-shop-logo {
+  width: 30mm;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-header h1 {
+  font-size: 14pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-title {
+  justify-items: center;
+  margin-top: 3mm;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-title strong {
+  font-size: 11pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-meta {
+  display: block;
+  padding: 3mm 0;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-meta > div {
+  width: 100%;
+  margin-bottom: 3mm;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items th,
+.invoice-root[data-layout="thermal"] .invoice-items td {
+  padding: 1.5mm 0.8mm;
+  font-size: 7.5pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items th:nth-child(3),
+.invoice-root[data-layout="thermal"] .invoice-items td:nth-child(3) {
+  display: none;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-items td:first-child span {
+  font-size: 8pt;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-summary dl {
+  width: 100%;
+}
+
+.invoice-root[data-layout="thermal"] .invoice-summary .invoice-total {
+  font-size: 11pt;
+}
+
+@media screen {
+  @container invoice-preview (max-width: 767px) {
+    .invoice-document,
+    .invoice-root[data-layout="thermal"] .invoice-document {
+      aspect-ratio: auto;
+      padding: 16px;
+    }
+
+    .invoice-header,
+    .invoice-meta {
+      gap: 16px;
+    }
+
+    .invoice-header {
+      padding-bottom: 16px;
+    }
+
+    .invoice-header h1 {
+      font-size: 16pt;
+    }
+
+    .invoice-title {
+      min-width: 0;
+    }
+
+    .invoice-title strong {
+      font-size: 14pt;
+    }
+
+    .invoice-title span {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+    }
+
+    .invoice-meta {
+      padding: 16px 0;
+    }
+
+    .invoice-items {
+      table-layout: fixed;
+    }
+
+    .invoice-items th,
+    .invoice-items td {
+      padding: 8px 4px;
+      font-size: 7.5pt;
+    }
+
+    .invoice-items th:first-child,
+    .invoice-items td:first-child {
+      width: 34%;
+      overflow-wrap: anywhere;
+    }
+
+    .invoice-items th:nth-child(2),
+    .invoice-items td:nth-child(2) {
+      width: 10%;
+    }
+
+    .invoice-items th:nth-child(3),
+    .invoice-items td:nth-child(3),
+    .invoice-items th:nth-child(4),
+    .invoice-items td:nth-child(4) {
+      width: 28%;
+    }
+
+    .invoice-summary dl {
+      width: min(72mm, 100%);
+    }
+  }
+
+  @container invoice-preview (max-width: 420px) {
+    .invoice-header,
+    .invoice-meta {
+      display: grid;
+    }
+
+    .invoice-title {
+      justify-items: start;
+    }
+
+    .invoice-meta > div {
+      width: 100%;
+    }
+  }
+}
+
+@media print {
+  /* Chrome can paginate the dashboard's nested flex/scroll wrappers even
+     after their screen-only children are hidden. Flatten those wrappers so
+     the invoice is the only print-layout box and no blank trailing page is
+     generated. */
+  html:has(.invoice-root),
+  body:has(.invoice-root) {
+    min-height: 0 !important;
+    height: auto !important;
+    margin: 0 !important;
+  }
+
+  body:has(.invoice-root) .min-h-screen,
+  body:has(.invoice-root) .min-h-screen > div,
+  body:has(.invoice-root) main,
+  body:has(.invoice-root) .dashboard-content,
+  body:has(.invoice-root) .invoice-preview-viewport {
+    display: contents !important;
+  }
+
+  .invoice-preview-viewport {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .invoice-root {
+    container: none;
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    break-after: avoid-page;
+  }
+
+  .invoice-root[data-layout="a4"] {
+    width: 210mm;
+    margin: 0;
+    page: auto;
+  }
+
+  .invoice-root[data-layout="a4"] .invoice-document {
+    width: 210mm;
+    min-height: 0;
+    height: auto;
+    aspect-ratio: auto;
+    padding: 15mm;
+    page: auto;
+    border: 0;
+  }
+
+  .invoice-root[data-layout="thermal"] {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    page: auto;
+  }
+
+  .invoice-root[data-layout="thermal"] .invoice-document {
+    width: var(--invoice-thermal-width, 80mm);
+    max-width: var(--invoice-thermal-width, 80mm);
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    aspect-ratio: auto;
+    padding: 0 0 4mm;
+    page: auto;
+    border: 0;
+    break-inside: avoid-page;
+    break-after: avoid-page;
+  }
+
+  .invoice-root[data-layout="thermal"] .invoice-shop-logo {
+    clip-path: inset(12.5% 0);
+    margin-top: -2.5mm;
+    margin-bottom: -2.5mm;
+  }
+
+}

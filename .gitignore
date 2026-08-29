@@ -1,0 +1,15 @@
+node_modules/
+.next/
+.env
+.env.local
+.env.production
+domcloud.env
+*.tsbuildinfo
+# Phase 0 scratch data — regenerate with `npm run seed`
+/data/*.json
+/data/*.tmp
+
+CLAUDE.md
+.neon
+.agents/
+skills-lock.json
