@@ -1,8 +1,8 @@
 # First deployment only. Replace the GitHub URL before pasting this into
 # DOM Cloud's Setup -> Deploy page. For a private repository, use DOM Cloud's
-# read-only deploy-key flow.
+# read-only deploy-key flow. Then run domcloud.prebuilt-first.yml.
 source:
-  url: ssh://git@github.com/YOUR_GITHUB_USER/YOUR_REPOSITORY.git
+  url: ssh://git@github.com:nazmuShakib/dom_ims.git
   branch: main
   depth: shallow
 
@@ -11,14 +11,14 @@ features:
   - postgresql
 
 nginx:
-  root: public_html/public
+  root: public_html/.dom-app/public
   passenger:
     enabled: on
     app_env: production
-    app_start_command: env PORT=$PORT npm start
+    app_start_command: env PORT=$PORT node --env-file=.env.local .dom-app/server.js
   locations:
     - match: /_next/static/
-      alias: public_html/.next/static/
+      alias: public_html/.dom-app/.next/static/
 
 commands:
   - mkdir -p public

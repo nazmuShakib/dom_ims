@@ -1,5 +1,8 @@
 node_modules/
 .next/
+.dom-app/
+.dom-tools/
+BUILD_SHA
 .env
 .env.local
 .env.production

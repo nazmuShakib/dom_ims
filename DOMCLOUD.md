@@ -1,83 +1,72 @@
-# Deploy to DOM Cloud with GitHub and internal PostgreSQL
+# Deploy to DOM Cloud without installing packages there
 
-This copy uses Prisma's normal PostgreSQL driver. It does not depend on Neon and
-is ready for DOM Cloud's localhost PostgreSQL service.
+This repository uses DOM Cloud's internal PostgreSQL database. GitHub Actions
+installs and builds the application on a native ARM64 runner, then publishes a
+small standalone bundle. DOM Cloud downloads that bundle instead of running
+`npm ci`, Yarn, pnpm, or `next build` on its memory-limited host.
 
-## 1. Push this folder to GitHub
+## One-time setup
 
-Create a new repository from this folder. Do not commit `.env`, `.env.local`,
-`node_modules`, or `.next`. They are already ignored.
+1. Push this repository to GitHub. The repository must be public for DOM Cloud
+   to download the release without a GitHub access token.
+2. Wait for **Actions -> Build DOM Cloud ARM64 bundle** to finish successfully.
+   A release named **DOM Cloud ARM64 build** should contain
+   `domcloud-arm64.tar.gz`.
+3. Provision a new site with `domcloud.initial.yml`. This step is already done
+   if the DOM Cloud site and database exist.
+4. Store production secrets in `~/.config/dom_ims.env` and link it as described
+   below.
+5. Paste `domcloud.prebuilt-first.yml` into **Setup -> Deploy**. This downloads
+   the matching release, applies Prisma migrations, creates the initial admin,
+   and starts the site.
+6. After the administrator is created, remove `INITIAL_ADMIN_NAME`,
+   `INITIAL_ADMIN_PHONE`, and `INITIAL_ADMIN_PASSWORD` from the private env
+   file.
 
-## 2. Provision the site and clone the repository
+## Private environment file
 
-Open `domcloud.initial.yml`, replace the GitHub URL, then paste the YAML into
-DOM Cloud's **Setup -> Deploy** page. If the repository is private, attach the
-read-only deploy key offered by DOM Cloud.
-
-The initial deployment clones the repository, installs Node 24, enables the
-internal PostgreSQL service, and configures NGINX/Passenger. It does not build
-the app yet because the database credentials and auth secret must not be stored
-in Git.
-
-## 3. Create the private environment file
-
-In DOM Cloud WebSSH, run:
+Create the file once in DOM Cloud WebSSH:
 
 ```bash
 mkdir -p ~/.config
 cp ~/public_html/.env.example ~/.config/dom_ims.env
 chmod 600 ~/.config/dom_ims.env
 nano ~/.config/dom_ims.env
-```
-
-In **Setup -> Database**, copy the exact PostgreSQL username, database name, and
-password into both `DATABASE_URL` and `DATABASE_URL_UNPOOLED`. Internal
-PostgreSQL is not pooled, so the two URLs should be identical. Percent-encode
-URL-special password characters; for example, `@` becomes `%40` and `#` becomes
-`%23`.
-
-Also set:
-
-- `DATA_SOURCE=postgres`
-- `BETTER_AUTH_SECRET` to the output of `openssl rand -base64 32`
-- `BETTER_AUTH_URL` to the site's exact HTTPS URL
-- the optional shop/invoice values as needed
-
-Keep `INITIAL_ADMIN_*` only until the first administrator has been created.
-
-## 4. Initialize the database and first administrator
-
-Before running the production deployment (which removes build-only tools), run:
-
-```bash
 cd ~/public_html
 ln -sfn "$HOME/.config/dom_ims.env" .env.local
-npm ci
-npm run db:deploy
-npm run auth:bootstrap
 ```
 
-After the administrator is created, delete the three `INITIAL_ADMIN_*` lines
-from `~/.config/dom_ims.env`.
+For DOM Cloud's internal PostgreSQL, put its exact username, password, and
+database name in both `DATABASE_URL` and `DATABASE_URL_UNPOOLED`. The URLs are
+identical because the local database connection is not pooled. Percent-encode
+special password characters such as `@` (`%40`) and `#` (`%23`). Also set the
+exact HTTPS site URL in `BETTER_AUTH_URL` and use a strong random
+`BETTER_AUTH_SECRET`.
 
-## 5. Build and start
+## Normal updates
 
-Paste `domcloud.deploy.yml` into **Setup -> Deploy**. It links the private env
-file, installs exact dependencies, applies all committed Prisma migrations,
-builds Next.js, removes build-only dependencies, and restarts Passenger.
+1. Commit and push changes to `main`.
+2. Wait for the ARM64 workflow and release to finish.
+3. Run `domcloud.deploy.yml` from DOM Cloud's **Setup -> Deploy** page.
 
-## Updating from GitHub
-
-Run `domcloud.deploy.yml` again, or configure it as the DOM Cloud GitHub webhook
-task. The private environment file remains outside `public_html`, so cloning or
-pulling the repository cannot overwrite its secrets.
+The deployment verifies that the release commit exactly matches the checked-out
+Git commit before replacing the running bundle. It keeps secrets outside the
+repository, links the bundled runtime dependencies for maintenance scripts, and
+runs `prisma migrate deploy` before restarting Passenger.
 
 ## Useful checks
 
+Run these from `~/public_html`:
+
 ```bash
-cd ~/public_html
-npm run db:status
-npm run db:verify
+node --env-file=.env.local .dom-tools/node_modules/prisma/build/index.js migrate status
+node --env-file=.env.local --import ./.dom-tools/node_modules/tsx/dist/loader.mjs scripts/verify-postgres.ts
 ```
 
-DOM Cloud process errors are available under **Check -> Check Process Logs**.
+DOM Cloud process errors are under **Check -> Check Process Logs**.
+
+## If a deployment stops at the commit check
+
+The GitHub release is older than the repository checkout, usually because the
+workflow is still running. Wait for the green Actions result and run the deploy
+again. The existing app bundle is not removed until this check passes.

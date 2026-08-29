@@ -1,4 +1,4 @@
-# Use for every update after the first administrator has been bootstrapped.
+# Run once after domcloud.initial.yml and after creating ~/.config/dom_ims.env.
 # The GitHub Actions workflow must have published the domcloud-latest release.
 features:
   - node 24
@@ -25,4 +25,5 @@ commands:
   - rm -f "/tmp/domcloud-arm64-${USER}.tar.gz"
   - ln -s .dom-app/node_modules node_modules
   - node --env-file=.env.local .dom-tools/node_modules/prisma/build/index.js migrate deploy
+  - node --env-file=.env.local --import ./.dom-tools/node_modules/tsx/dist/loader.mjs scripts/bootstrap-admin.ts
   - restart
