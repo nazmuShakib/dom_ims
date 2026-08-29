@@ -16,11 +16,40 @@ async function main() {
     );
   }
 
-  if ((await prisma.user.count()) > 0) {
-    throw new Error('Bootstrap refused: an authentication user already exists.');
+  const phoneNumber = normalizeBangladeshMobileE164(phone);
+  const existingUsers = await prisma.user.findMany({
+    take: 2,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phoneNumber: true,
+      phoneNumberVerified: true,
+      role: true,
+      _count: { select: { accounts: true, sessions: true, auditLogs: true } },
+    },
+  });
+
+  if (existingUsers.length > 0) {
+    const orphan = existingUsers.length === 1 ? existingUsers[0]! : null;
+    const isInterruptedBootstrap =
+      orphan?.name === name &&
+      orphan.email.endsWith('@ims.internal') &&
+      orphan.phoneNumber === phoneNumber &&
+      orphan.phoneNumberVerified === false &&
+      orphan.role === 'ADMIN' &&
+      orphan._count.accounts === 0 &&
+      orphan._count.sessions === 0 &&
+      orphan._count.auditLogs === 0;
+
+    if (!isInterruptedBootstrap || !orphan) {
+      throw new Error('Bootstrap refused: an authentication user already exists.');
+    }
+
+    await prisma.user.delete({ where: { id: orphan.id } });
+    console.log('Removed the incomplete ADMIN left by an interrupted bootstrap.');
   }
 
-  const phoneNumber = normalizeBangladeshMobileE164(phone);
   const email = generateInternalAuthEmail();
   const created = await auth.api.createUser({
     body: {

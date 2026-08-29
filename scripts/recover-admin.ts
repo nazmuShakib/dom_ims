@@ -1,7 +1,7 @@
 import { PrismaClient } from '@prisma/client';
-import { hashPassword } from 'better-auth/crypto';
 
 import { uuidv7 } from '@/lib/ids';
+import { hashPassword } from '@/lib/password';
 import { isBangladeshMobile, normalizeBangladeshMobileE164 } from '@/lib/phone';
 
 const CONFIRMATION = 'RESET_DEV_ADMIN';

@@ -7,6 +7,7 @@ import { adminAc, defaultAc, userAc } from 'better-auth/plugins/admin/access';
 
 import { prisma } from '@/lib/prisma';
 import { isBangladeshMobile } from '@/lib/phone';
+import { hashPassword, verifyPassword } from '@/lib/password';
 
 export const auth = betterAuth({
   appName: 'Electronics Shop Inventory',
@@ -23,6 +24,10 @@ export const auth = betterAuth({
     disableSignUp: true,
     minPasswordLength: 12,
     maxPasswordLength: 128,
+    password: {
+      hash: hashPassword,
+      verify: verifyPassword,
+    },
   },
   user: {
     additionalFields: {
