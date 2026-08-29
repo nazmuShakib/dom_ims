@@ -1,6 +1,6 @@
-import { auth } from '@/lib/auth';
 import { generateInternalAuthEmail } from '@/lib/auth-identity';
 import { uuidv7 } from '@/lib/ids';
+import { hashPassword } from '@/lib/password';
 import { isBangladeshMobile, normalizeBangladeshMobileE164 } from '@/lib/phone';
 import { prisma } from '@/lib/prisma';
 
@@ -9,10 +9,17 @@ async function main() {
   const phone = process.env.INITIAL_ADMIN_PHONE?.trim();
   const password = process.env.INITIAL_ADMIN_PASSWORD;
 
-  if (!name || !phone || !isBangladeshMobile(phone) || !password || password.length < 12) {
+  if (
+    !name ||
+    !phone ||
+    !isBangladeshMobile(phone) ||
+    !password ||
+    password.length < 12 ||
+    password.length > 128
+  ) {
     throw new Error(
       'Set INITIAL_ADMIN_NAME, a valid INITIAL_ADMIN_PHONE, and INITIAL_ADMIN_PASSWORD ' +
-        '(at least 12 characters) in .env.local.',
+        '(12–128 characters) in .env.local.',
     );
   }
 
@@ -51,29 +58,43 @@ async function main() {
   }
 
   const email = generateInternalAuthEmail();
-  const created = await auth.api.createUser({
-    body: {
-      name,
-      email,
-      password,
-      role: 'ADMIN' as never,
-      data: { isActive: true, phoneNumber },
-    },
-  });
-  await prisma.user.update({
-    where: { id: created.user.id },
-    data: { phoneNumber, phoneNumberVerified: true },
-  });
+  const userId = uuidv7();
+  const passwordHash = await hashPassword(password);
 
-  await prisma.auditLog.create({
-    data: {
-      id: uuidv7(),
-      actorId: created.user.id,
-      action: 'user.bootstrap_admin',
-      entity: 'User',
-      entityId: created.user.id,
-      after: { name, phoneNumber, role: 'ADMIN', isActive: true },
-    },
+  await prisma.$transaction(async (transaction) => {
+    await transaction.user.create({
+      data: {
+        id: userId,
+        name,
+        email,
+        emailVerified: false,
+        phoneNumber,
+        phoneNumberVerified: true,
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+
+    await transaction.account.create({
+      data: {
+        id: uuidv7(),
+        userId,
+        accountId: userId,
+        providerId: 'credential',
+        password: passwordHash,
+      },
+    });
+
+    await transaction.auditLog.create({
+      data: {
+        id: uuidv7(),
+        actorId: userId,
+        action: 'user.bootstrap_admin',
+        entity: 'User',
+        entityId: userId,
+        after: { name, phoneNumber, role: 'ADMIN', isActive: true },
+      },
+    });
   });
 
   console.log(`Created initial ADMIN: ${phoneNumber}`);
