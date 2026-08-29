@@ -59,8 +59,8 @@ runs `prisma migrate deploy` before restarting Passenger.
 Run these from `~/public_html`:
 
 ```bash
-node --env-file=.env.local .dom-tools/node_modules/prisma/build/index.js migrate status
-node --env-file=.env.local --import ./.dom-tools/node_modules/tsx/dist/loader.mjs scripts/verify-postgres.ts
+node --env-file=.env.local .dom-app/node_modules/prisma/build/index.js migrate status
+node --env-file=.env.local --import ./.dom-app/node_modules/tsx/dist/loader.mjs scripts/verify-postgres.ts
 ```
 
 DOM Cloud process errors are under **Check -> Check Process Logs**.

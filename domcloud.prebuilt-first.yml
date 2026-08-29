@@ -24,6 +24,6 @@ commands:
   - tar -xzf "/tmp/domcloud-arm64-${USER}.tar.gz"
   - rm -f "/tmp/domcloud-arm64-${USER}.tar.gz"
   - ln -s .dom-app/node_modules node_modules
-  - node --env-file=.env.local .dom-tools/node_modules/prisma/build/index.js migrate deploy
-  - node --env-file=.env.local --import ./.dom-tools/node_modules/tsx/dist/loader.mjs scripts/bootstrap-admin.ts
+  - node --env-file=.env.local .dom-app/node_modules/prisma/build/index.js migrate deploy
+  - node --env-file=.env.local --import ./.dom-app/node_modules/tsx/dist/loader.mjs scripts/bootstrap-admin.ts
   - restart

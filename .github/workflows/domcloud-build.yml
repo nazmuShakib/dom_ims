@@ -52,16 +52,24 @@ jobs:
 
       - name: Assemble the DOM Cloud bundle
         run: |
-          mkdir -p bundle/.dom-app bundle/.dom-tools
+          mkdir -p bundle/.dom-app tooling
           cp -a .next/standalone/. bundle/.dom-app/
           mkdir -p bundle/.dom-app/.next
           cp -a .next/static bundle/.dom-app/.next/static
           cp -a public bundle/.dom-app/public
           prisma_version="$(node -p "require('./node_modules/prisma/package.json').version")"
+          prisma_client_version="$(node -p "require('./node_modules/@prisma/client/package.json').version")"
           tsx_version="$(node -p "require('./node_modules/tsx/package.json').version")"
-          npm install --prefix bundle/.dom-tools --omit=dev --no-audit --no-fund --package-lock=false "prisma@$prisma_version" "tsx@$tsx_version"
+          better_auth_version="$(node -p "require('./node_modules/better-auth/package.json').version")"
+          npm install --prefix tooling --omit=dev --no-audit --no-fund --package-lock=false \
+            "prisma@$prisma_version" \
+            "@prisma/client@$prisma_client_version" \
+            "tsx@$tsx_version" \
+            "better-auth@$better_auth_version"
+          cp -a tooling/node_modules/. bundle/.dom-app/node_modules/
+          cp -a node_modules/.prisma bundle/.dom-app/node_modules/.prisma
           printf '%s\n' "$GITHUB_SHA" > bundle/BUILD_SHA
-          tar -C bundle -czf domcloud-arm64.tar.gz .dom-app .dom-tools BUILD_SHA
+          tar -C bundle -czf domcloud-arm64.tar.gz .dom-app BUILD_SHA
           du -sh bundle domcloud-arm64.tar.gz
 
       - name: Replace the rolling DOM Cloud release
