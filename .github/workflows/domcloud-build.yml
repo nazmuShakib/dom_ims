@@ -67,7 +67,12 @@ jobs:
             "tsx@$tsx_version" \
             "better-auth@$better_auth_version"
           cp -a tooling/node_modules/. bundle/.dom-app/node_modules/
+          rm -rf bundle/.dom-app/node_modules/.prisma
           cp -a node_modules/.prisma bundle/.dom-app/node_modules/.prisma
+          (
+            cd bundle/.dom-app
+            node --input-type=module -e 'const { PrismaClient } = await import("@prisma/client"); const prisma = new PrismaClient(); await prisma.$disconnect(); await import("better-auth");'
+          )
           printf '%s\n' "$GITHUB_SHA" > bundle/BUILD_SHA
           tar -C bundle -czf domcloud-arm64.tar.gz .dom-app BUILD_SHA
           du -sh bundle domcloud-arm64.tar.gz
