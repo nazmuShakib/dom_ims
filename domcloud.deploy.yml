@@ -9,7 +9,7 @@ nginx:
   passenger:
     enabled: on
     app_env: production
-    app_start_command: env PORT=$PORT node --env-file=.env.local .dom-app/server.js
+    app_start_command: env PORT=$PORT node --env-file=.env.local server.js
   locations:
     - match: /_next/static/
       alias: public_html/.dom-app/.next/static/
@@ -23,6 +23,7 @@ commands:
   - rm -rf .dom-app .dom-tools node_modules
   - tar -xzf "/tmp/domcloud-arm64-${USER}.tar.gz"
   - rm -f "/tmp/domcloud-arm64-${USER}.tar.gz"
+  - ln -sfn "$HOME/.config/dom_ims.env" .dom-app/.env.local
   - ln -s .dom-app/node_modules node_modules
   - node --env-file=.env.local .dom-app/node_modules/prisma/build/index.js migrate deploy
   - restart

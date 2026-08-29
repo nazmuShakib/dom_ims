@@ -15,7 +15,7 @@ nginx:
   passenger:
     enabled: on
     app_env: production
-    app_start_command: env PORT=$PORT node --env-file=.env.local .dom-app/server.js
+    app_start_command: env PORT=$PORT node --env-file=.env.local server.js
   locations:
     - match: /_next/static/
       alias: public_html/.dom-app/.next/static/
