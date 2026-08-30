@@ -124,5 +124,5 @@ jobs:
                 "node --env-file=.env.local .dom-app/node_modules/prisma/build/index.js migrate deploy",
                 "restart"
               ],
-              "wait": 90
+              "wait": 1
             }
