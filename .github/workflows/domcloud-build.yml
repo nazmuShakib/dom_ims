@@ -126,10 +126,3 @@ jobs:
               ],
               "wait": 90
             }
-
-      - name: Check DOM Cloud deployment status
-        uses: distributhor/workflow-webhook@v3
-        env:
-          webhook_url: https://my.domcloud.co/api/githubdeploycheck
-          webhook_secret: ${{ secrets.WEBHOOK_SECRET }}
-          webhook_auth: ${{ secrets.WEBHOOK_AUTH }}
