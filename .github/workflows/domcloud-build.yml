@@ -86,3 +86,50 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "DOM Cloud ARM64 build" \
             --notes "ARM64 production bundle for commit $GITHUB_SHA"
+
+      - name: Deploy the released bundle to DOM Cloud
+        uses: distributhor/workflow-webhook@v3
+        env:
+          webhook_url: https://my.domcloud.co/api/githubdeploy
+          webhook_secret: ${{ secrets.WEBHOOK_SECRET }}
+          webhook_auth: ${{ secrets.WEBHOOK_AUTH }}
+          data: |
+            {
+              "features": ["node 24", "postgresql"],
+              "nginx": {
+                "root": "public_html/.dom-app/public",
+                "passenger": {
+                  "enabled": "on",
+                  "app_env": "production",
+                  "app_start_command": "env PORT=$PORT HOSTNAME=127.0.0.1 node --env-file=.env.local server.js"
+                },
+                "locations": [
+                  {
+                    "match": "/_next/static/",
+                    "alias": "public_html/.dom-app/.next/static/"
+                  }
+                ]
+              },
+              "commands": [
+                "git pull --ff-only",
+                "test -f \"$HOME/.config/dom_ims.env\"",
+                "ln -sfn \"$HOME/.config/dom_ims.env\" .env.local",
+                "curl --fail --location --retry 3 --retry-all-errors --output \"/tmp/domcloud-arm64-${USER}.tar.gz\" \"https://github.com/nazmuShakib/dom_ims/releases/download/domcloud-latest/domcloud-arm64.tar.gz\"",
+                "test \"$(git rev-parse HEAD)\" = \"$(tar -xOf \"/tmp/domcloud-arm64-${USER}.tar.gz\" BUILD_SHA)\"",
+                "rm -rf .dom-app .dom-tools node_modules",
+                "tar -xzf \"/tmp/domcloud-arm64-${USER}.tar.gz\"",
+                "rm -f \"/tmp/domcloud-arm64-${USER}.tar.gz\"",
+                "ln -sfn \"$HOME/.config/dom_ims.env\" .dom-app/.env.local",
+                "ln -s .dom-app/node_modules node_modules",
+                "node --env-file=.env.local .dom-app/node_modules/prisma/build/index.js migrate deploy",
+                "restart"
+              ],
+              "wait": 1
+            }
+
+      - name: Check DOM Cloud deployment status
+        uses: distributhor/workflow-webhook@v3
+        env:
+          webhook_url: https://my.domcloud.co/api/githubdeploycheck
+          webhook_secret: ${{ secrets.WEBHOOK_SECRET }}
+          webhook_auth: ${{ secrets.WEBHOOK_AUTH }}
