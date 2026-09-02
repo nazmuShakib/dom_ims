@@ -17,10 +17,14 @@ function snapshot(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-export async function writeAudit(input: AuditInput): Promise<void> {
+export async function requestAuditIp(): Promise<string | null> {
   const requestHeaders = await headers();
   const forwarded = requestHeaders.get('x-forwarded-for');
-  const ip = forwarded?.split(',')[0]?.trim() || requestHeaders.get('x-real-ip');
+  return forwarded?.split(',')[0]?.trim() || requestHeaders.get('x-real-ip');
+}
+
+export async function writeAudit(input: AuditInput): Promise<void> {
+  const ip = await requestAuditIp();
 
   await prisma.auditLog.create({
     data: {

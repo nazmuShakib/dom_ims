@@ -27,8 +27,8 @@ describe('Phase 6 repository cutover', () => {
     const repository = source('src/repositories/prisma/index.ts');
     expect(repository).toContain('prisma.$transaction(');
     expect(repository).toContain('fn(createRepositories(tx))');
-    expect(repository).toContain('maxWait: 5_000');
-    expect(repository).toContain('timeout: 15_000');
+    expect(repository).toContain('maxWait: options?.maxWait ?? 5_000');
+    expect(repository).toContain('timeout: options?.timeout ?? 15_000');
   });
 
   it('keeps movements append-only and guards stock updates atomically', () => {

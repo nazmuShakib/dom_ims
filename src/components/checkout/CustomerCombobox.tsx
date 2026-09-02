@@ -13,6 +13,8 @@ import { Check, ChevronDown, Search, X } from "lucide-react";
 import { useI18n } from "@/components/i18n/I18nProvider";
 import type { Customer } from "@/domain/types";
 
+const MAX_VISIBLE_RESULTS = 50;
+
 function customerLabel(customer: Customer): string {
   return customer.phone ? `${customer.name} — ${customer.phone}` : customer.name;
 }
@@ -52,7 +54,9 @@ export function CustomerCombobox({
       )
       .sort((left, right) => matchRank(left, normalizedQuery) - matchRank(right, normalizedQuery));
   }, [customers, query]);
-  const optionCount = filteredCustomers.length + 1;
+  const visibleCustomers = filteredCustomers.slice(0, MAX_VISIBLE_RESULTS);
+  const hiddenResultCount = filteredCustomers.length - visibleCustomers.length;
+  const optionCount = visibleCustomers.length + 1;
 
   useEffect(() => {
     setActiveIndex((current) => Math.min(current, optionCount - 1));
@@ -73,7 +77,8 @@ export function CustomerCombobox({
     setOpen(true);
     setQuery("");
     const selectedIndex = selectedCustomer
-      ? customers.findIndex((customer) => customer.id === selectedCustomer.id) + 1
+      ? customers.slice(0, MAX_VISIBLE_RESULTS)
+          .findIndex((customer) => customer.id === selectedCustomer.id) + 1
       : 0;
     setActiveIndex(Math.max(0, selectedIndex));
   }
@@ -99,7 +104,7 @@ export function CustomerCombobox({
     }
     if (event.key === "Enter" && open) {
       event.preventDefault();
-      selectCustomer(activeIndex === 0 ? "" : filteredCustomers[activeIndex - 1]?.id ?? "");
+      selectCustomer(activeIndex === 0 ? "" : visibleCustomers[activeIndex - 1]?.id ?? "");
       return;
     }
     if (event.key === "Escape" && open) {
@@ -121,6 +126,7 @@ export function CustomerCombobox({
           type="text"
           role="combobox"
           aria-autocomplete="list"
+          aria-label={t("common.customer")}
           aria-expanded={open}
           aria-controls={listboxId}
           aria-activedescendant={open ? `${listboxId}-option-${activeIndex}` : undefined}
@@ -188,7 +194,7 @@ export function CustomerCombobox({
             {!value && <Check aria-hidden="true" className="size-4 text-signal" />}
           </div>
 
-          {filteredCustomers.length > 0 ? filteredCustomers.map((customer, index) => {
+          {visibleCustomers.length > 0 ? visibleCustomers.map((customer, index) => {
             const optionIndex = index + 1;
             return (
               <div
@@ -212,6 +218,11 @@ export function CustomerCombobox({
             );
           }) : (
             <p className="px-3 py-5 text-center text-[12px] text-graphite">{t("customers.noMatch")}</p>
+          )}
+          {hiddenResultCount > 0 && (
+            <p className="border-t border-rule px-3 py-2 text-[11px] text-graphite">
+              {t("checkout.moreMatches", { count: hiddenResultCount })}
+            </p>
           )}
         </div>
       )}

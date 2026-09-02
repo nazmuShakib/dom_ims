@@ -1,7 +1,10 @@
 import { uuidv7 } from '@/lib/ids';
 import { prismaRepositories } from '@/repositories/prisma';
+import type { Repositories } from '@/repositories';
+import { checkoutCart } from '@/services/checkout';
 
 class RollbackVerification extends Error {}
+class AuditWriteVerificationFailure extends Error {}
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -22,6 +25,11 @@ async function main() {
   const customerId = uuidv7();
   const cartId = uuidv7();
   const saleId = uuidv7();
+  const atomicCategoryId = uuidv7();
+  const atomicProductId = uuidv7();
+  const atomicActorId = uuidv7();
+  const atomicCartId = uuidv7();
+  const atomicCheckoutKey = uuidv7();
   const now = new Date().toISOString();
 
   try {
@@ -145,6 +153,7 @@ async function main() {
         id: saleId,
         invoiceNumber,
         idempotencyKey: uuidv7(),
+        checkoutCartId: cartId,
         status: 'COMPLETED',
         customerId,
         customerName: 'Rollback customer',
@@ -153,13 +162,13 @@ async function main() {
         actorName: 'Rollback checkout actor',
         paymentMethod: 'CASH',
         paymentStatus: 'PAID',
-        amountPaid: 1_400,
+        amountPaid: 0,
         reference: 'ROLLBACK-VERIFY',
         note: null,
         subtotal: 1_500,
         discount: 100,
         total: 1_400,
-        tradeInCredit: 0,
+        tradeInCredit: 2_000,
         tradeInDetails: null,
         completedAt: now,
         createdAt: now,
@@ -171,6 +180,26 @@ async function main() {
         refundMethod: null,
         voidIdempotencyKey: null,
       });
+      const tradeInPayout = await tx.saleSettlements.create({
+        id: uuidv7(),
+        receiptNumber: await tx.saleSettlements.nextReceiptNumber('TRADE_IN_PAYOUT', new Date(now)),
+        idempotencyKey: uuidv7(),
+        saleId,
+        type: 'TRADE_IN_PAYOUT',
+        amount: 600,
+        paymentMethod: 'CASH',
+        reference: 'ROLLBACK-VERIFY',
+        note: null,
+        recordedById: checkoutActorId,
+        recordedByName: 'Rollback checkout actor',
+        recordedAt: now,
+        createdAt: now,
+      });
+      assert(tradeInPayout.amount === 600, 'Excess trade-in payout amount is incorrect.');
+      assert(
+        (await tx.saleSettlements.findBySale(saleId)).some((entry) => entry.id === tradeInPayout.id),
+        'Excess trade-in payout persistence failed.',
+      );
       await tx.products._applyQuantityDelta(bulkProductId, -1);
       const checkoutMovement = await tx.movements.record({
         id: uuidv7(), type: 'OUT', reason: 'SALE', productId: bulkProductId,
@@ -196,6 +225,21 @@ async function main() {
       });
       assert((await tx.sales.findItems(saleId)).length === 1, 'Invoice item persistence failed.');
       assert((await tx.sales.findById(saleId))?.invoiceNumber === invoiceNumber, 'Invoice persistence failed.');
+      const checkoutAudit = await tx.auditLogs.create({
+        id: uuidv7(),
+        actorId: checkoutActorId,
+        action: 'sale.complete',
+        entity: 'Sale',
+        entityId: saleId,
+        before: null,
+        after: { invoiceNumber, total: 1_400, tradeInCredit: 2_000 },
+        ip: '127.0.0.1',
+        createdAt: now,
+      });
+      assert(
+        (await tx.auditLogs.findByEntity('Sale', saleId)).some((entry) => entry.id === checkoutAudit.id),
+        'Atomic checkout audit persistence failed.',
+      );
       await tx.carts.delete(cartId);
       assert((await tx.carts.findById(cartId)) === null, 'Completed draft cleanup failed.');
 
@@ -206,13 +250,142 @@ async function main() {
     if (!(error instanceof RollbackVerification)) throw error;
   }
 
-  const [bulk, serial, customer, sale] = await Promise.all([
+  try {
+    await prismaRepositories.transaction(async (tx) => {
+      await tx.categories.create({
+        id: atomicCategoryId,
+        name: `Atomic checkout ${atomicCategoryId}`,
+        slug: `atomic-checkout-${atomicCategoryId}`,
+        parentId: null,
+        isActive: true,
+      });
+      await tx.users.create({
+        id: atomicActorId,
+        name: 'Atomic checkout actor',
+        email: `atomic-${atomicActorId}@example.invalid`,
+        emailVerified: true,
+        phoneNumber: null,
+        phoneNumberVerified: false,
+        image: null,
+        role: 'STAFF',
+        isActive: true,
+      });
+      await tx.products.create({
+        id: atomicProductId,
+        sku: `ATOMIC-${atomicProductId}`,
+        barcode: null,
+        name: `Atomic checkout product ${atomicProductId}`,
+        description: null,
+        model: null,
+        trackingType: 'QUANTITY',
+        categoryId: atomicCategoryId,
+        brandId: null,
+        defaultCostPrice: 1_000,
+        defaultSalePrice: 1_400,
+        staffMaxDiscount: 0,
+        taxRate: 0,
+        reorderPoint: 1,
+        quantityOnHand: 0,
+        avgCostPrice: 0,
+        imageUrl: null,
+        isActive: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await tx.products._applyQuantityDelta(atomicProductId, 1, 1_000);
+      await tx.movements.record({
+        id: uuidv7(),
+        type: 'IN',
+        reason: 'PURCHASE',
+        productId: atomicProductId,
+        unitId: null,
+        quantity: 1,
+        unitCost: 1_000,
+        unitPrice: null,
+        supplierId: null,
+        customerName: null,
+        customerPhone: null,
+        reference: 'ATOMIC-CHECKOUT-VERIFY',
+        note: null,
+        actorId: atomicActorId,
+        idempotencyKey: uuidv7(),
+        reversesId: null,
+        createdAt: now,
+      });
+      await tx.carts.create({
+        id: atomicCartId,
+        actorId: atomicActorId,
+        tradeInDraft: null,
+        createdAt: now,
+        updatedAt: now,
+      });
+
+      let faultingRepositories: Repositories;
+      faultingRepositories = {
+        ...tx,
+        auditLogs: {
+          ...tx.auditLogs,
+          async create() {
+            throw new AuditWriteVerificationFailure();
+          },
+        },
+        transaction: (fn) => fn(faultingRepositories),
+      };
+
+      await checkoutCart({
+        cartId: atomicCartId,
+        actorId: atomicActorId,
+        actorName: 'Atomic checkout actor',
+        actorRole: 'STAFF',
+        idempotencyKey: atomicCheckoutKey,
+        lines: [{
+          clientId: 'atomic-checkout-line',
+          productId: atomicProductId,
+          unitId: null,
+          quantity: 1,
+          actualUnitPrice: 1_400,
+        }],
+        customerId: null,
+        paymentMethod: 'CASH',
+        tradeInPayoutMethod: 'CASH',
+        paymentStatus: 'PAID',
+        reference: 'ATOMIC-CHECKOUT-VERIFY',
+        note: null,
+        isEmi: false,
+        emiTermMonths: null,
+        emiDownPayment: 0,
+        emiFirstDueDate: null,
+        identificationType: null,
+        identificationNumber: null,
+        auditIp: '127.0.0.1',
+      }, faultingRepositories);
+    });
+    throw new Error('Checkout unexpectedly committed after its audit write failed.');
+  } catch (error) {
+    if (!(error instanceof AuditWriteVerificationFailure)) throw error;
+  }
+
+  const [
+    bulk, serial, customer, sale, settlements, auditLogs,
+    atomicCategory, atomicProduct, atomicActor, atomicCart, atomicSale,
+  ] = await Promise.all([
     prismaRepositories.products.findById(bulkProductId),
     prismaRepositories.products.findById(serialProductId),
     prismaRepositories.customers.findById(customerId),
     prismaRepositories.sales.findById(saleId),
+    prismaRepositories.saleSettlements.findBySale(saleId),
+    prismaRepositories.auditLogs.findByEntity('Sale', saleId),
+    prismaRepositories.categories.findById(atomicCategoryId),
+    prismaRepositories.products.findById(atomicProductId),
+    prismaRepositories.users.findById(atomicActorId),
+    prismaRepositories.carts.findById(atomicCartId),
+    prismaRepositories.sales.findByIdempotencyKey(atomicCheckoutKey),
   ]);
-  assert(!bulk && !serial && !customer && !sale, 'Verification rollback failed; temporary records remain.');
+  assert(
+    !bulk && !serial && !customer && !sale && settlements.length === 0 && auditLogs.length === 0
+      && !atomicCategory && !atomicProduct && !atomicActor && !atomicCart && !atomicSale,
+    'Verification rollback failed; temporary records remain.',
+  );
   console.log('PostgreSQL repository verification passed; transaction rolled back with no dummy data retained.');
 }
 

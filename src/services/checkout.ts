@@ -7,7 +7,9 @@ import type {
 import { PAYMENT_METHODS, PAYMENT_STATUSES } from '@/domain/types';
 import { uuidv7 } from '@/lib/ids';
 import { formatBDT } from '@/lib/money';
+import { hasPermission } from '@/lib/permissions';
 import { normalizeBangladeshMobile } from '@/lib/phone';
+import { dhakaDateKey } from '@/lib/time';
 import { db, type Repositories } from '@/repositories';
 import {
   checkoutSchema, localCheckoutLinesSchema, createCustomerSchema,
@@ -33,6 +35,7 @@ const checkoutSubmissionSchema = checkoutSchema.extend({
   emiFirstDueDate: z.string().datetime().nullable(),
   identificationType: z.enum(['NID', 'PASSPORT', 'BIRTH_CERTIFICATE']).nullable(),
   identificationNumber: z.string().trim().max(100).nullable(),
+  auditIp: z.string().trim().max(255).nullable(),
 });
 
 export function normalizePhone(value: string | null | undefined): string | null {
@@ -129,9 +132,13 @@ export async function clearTradeInDraft(cartId: string, actorId: string): Promis
   });
 }
 
-function addMonths(iso: string, months: number): string {
+export function addCalendarMonths(iso: string, months: number): string {
   const date = new Date(iso);
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
   date.setUTCMonth(date.getUTCMonth() + months);
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
   return date.toISOString();
 }
 
@@ -139,6 +146,32 @@ function addDays(iso: string, days: number): string {
   const date = new Date(iso);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString();
+}
+
+function addDateKeyDays(dateKey: string, days: number): string {
+  const value = new Date(`${dateKey}T12:00:00.000Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export function isEmiFirstDueDateAllowed(firstDueDate: Date, now = new Date()): boolean {
+  const firstDueDateKey = dhakaDateKey(firstDueDate);
+  const todayKey = dhakaDateKey(now);
+  return firstDueDateKey >= todayKey && firstDueDateKey <= addDateKeyDays(todayKey, 31);
+}
+
+export function checkoutTransactionTimeout(lineCount: number): number {
+  return Math.min(120_000, Math.max(15_000, 10_000 + Math.max(1, lineCount) * 400));
+}
+
+function ownedCheckoutReplay(
+  replay: Sale,
+  input: Pick<z.infer<typeof checkoutSubmissionSchema>, 'actorId' | 'cartId'>,
+): Sale {
+  if (replay.actorId !== input.actorId || replay.checkoutCartId !== input.cartId) {
+    throw new Error('This checkout request belongs to a different cart or seller. Start a fresh checkout.');
+  }
+  return replay;
 }
 
 /**
@@ -165,13 +198,27 @@ export async function checkoutCart(raw: {
   emiFirstDueDate: string | null;
   identificationType: 'NID' | 'PASSPORT' | 'BIRTH_CERTIFICATE' | null;
   identificationNumber: string | null;
-}): Promise<Sale> {
+  auditIp: string | null;
+}, repositories: Repositories = db): Promise<Sale> {
   const input = checkoutSubmissionSchema.parse(raw);
-  return db.transaction(async (tx) => {
-    const replay = await tx.sales.findByIdempotencyKey(input.idempotencyKey);
-    if (replay) return replay;
+  return repositories.transaction(async (tx) => {
+    let replay = await tx.sales.findByIdempotencyKey(input.idempotencyKey);
+    if (replay) return ownedCheckoutReplay(replay, input);
 
-    const cart = await ownedCart(tx, input.cartId, input.actorId);
+    const cart = await tx.carts.findByIdForUpdate(input.cartId);
+    if (!cart) {
+      // A concurrent request may have completed and deleted this cart while
+      // this transaction waited for its row lock. Re-read after the wait.
+      replay = await tx.sales.findByIdempotencyKey(input.idempotencyKey);
+      if (replay) return ownedCheckoutReplay(replay, input);
+      throw new Error('Draft cart not found.');
+    }
+    if (cart.actorId !== input.actorId) throw new Error('Draft cart not found.');
+    replay = await tx.sales.findByIdempotencyKey(input.idempotencyKey);
+    if (replay) return ownedCheckoutReplay(replay, input);
+    if (cart.tradeInDraft && !hasPermission(input.actorRole, 'MANAGE_USED_DEVICES')) {
+      throw new Error('Manager or Admin approval is required to complete a checkout with a trade-in.');
+    }
     const customer = input.customerId ? await tx.customers.findById(input.customerId) : null;
     if (input.customerId && !customer?.isActive) throw new Error('The selected customer is unavailable.');
 
@@ -190,12 +237,7 @@ export async function checkoutCart(raw: {
       if (!input.emiTermMonths) throw new Error('Choose a valid EMI term.');
       if (!input.emiFirstDueDate) throw new Error('Choose the first installment date.');
       const firstDueDate = new Date(input.emiFirstDueDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const latest = new Date(today);
-      latest.setDate(latest.getDate() + 31);
-      latest.setHours(23, 59, 59, 999);
-      if (firstDueDate < today || firstDueDate > latest) {
+      if (!isEmiFirstDueDateAllowed(firstDueDate)) {
         throw new Error('First installment date must be today or within the next 31 days.');
       }
       await tx.customers.update(customer.id, {
@@ -253,6 +295,12 @@ export async function checkoutCart(raw: {
     const subtotal = resolved.reduce((sum, row) => sum + row.item.listUnitPrice * row.item.quantity, 0);
     const total = resolved.reduce((sum, row) => sum + row.item.actualUnitPrice * row.item.quantity, 0);
     const tradeInCredit = cart.tradeInDraft?.acquisitionValue ?? 0;
+    if (input.isEmi && resolved.some((row) => row.item.actualUnitPrice % 100 !== 0)) {
+      throw new Error('Each EMI selling price must use a whole-taka amount.');
+    }
+    if (input.isEmi && total <= 0) {
+      throw new Error('EMI total must be greater than zero.');
+    }
     if (input.isEmi && input.emiDownPayment + tradeInCredit > total) {
       throw new Error('Down payment and trade-in credit cannot exceed the EMI total.');
     }
@@ -288,6 +336,7 @@ export async function checkoutCart(raw: {
       id: uuidv7(),
       invoiceNumber,
       idempotencyKey: input.idempotencyKey,
+      checkoutCartId: cart.id,
       status: 'COMPLETED',
       customerId: customer?.id ?? null,
       customerName: customer?.name ?? null,
@@ -354,7 +403,7 @@ export async function checkoutCart(raw: {
           warrantyExpiresAt: unit.warrantyDays
             ? addDays(now, unit.warrantyDays)
             : unit.warrantyMonths
-              ? addMonths(now, unit.warrantyMonths)
+              ? addCalendarMonths(now, unit.warrantyMonths)
               : null,
         });
       } else {
@@ -417,7 +466,27 @@ export async function checkoutCart(raw: {
       }
     }
 
+    await tx.auditLogs.create({
+      id: uuidv7(),
+      actorId: input.actorId,
+      action: 'sale.complete',
+      entity: 'Sale',
+      entityId: sale.id,
+      before: null,
+      after: {
+        invoiceNumber: sale.invoiceNumber,
+        customerId: sale.customerId,
+        paymentMethod: sale.paymentMethod,
+        paymentStatus: sale.paymentStatus,
+        subtotal: sale.subtotal,
+        discount: sale.discount,
+        total: sale.total,
+        tradeInCredit: sale.tradeInCredit,
+      },
+      ip: input.auditIp,
+      createdAt: now,
+    });
     await tx.carts.delete(cart.id);
     return sale;
-  });
+  }, { timeout: checkoutTransactionTimeout(input.lines.length) });
 }

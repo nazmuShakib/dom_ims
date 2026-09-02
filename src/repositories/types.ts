@@ -33,6 +33,7 @@ import type {
   EmiPayment,
   EmiPaymentAllocation,
   EmiEarlySettlement,
+  AuditLog,
 } from '@/domain/types';
 import type { Paisa } from '@/lib/money';
 
@@ -151,9 +152,15 @@ export interface CustomerRepository {
 export interface CartRepository {
   findByActor(actorId: string): Promise<CartDraft | null>;
   findById(id: string): Promise<CartDraft | null>;
+  findByIdForUpdate(id: string): Promise<CartDraft | null>;
   create(value: CartDraft): Promise<CartDraft>;
   update(id: string, patch: Partial<Pick<CartDraft, 'tradeInDraft'>>): Promise<CartDraft>;
   delete(id: string): Promise<void>;
+}
+
+export interface AuditLogRepository {
+  findByEntity(entity: string, entityId: string): Promise<AuditLog[]>;
+  create(value: AuditLog): Promise<AuditLog>;
 }
 
 export interface UsedDeviceAcquisitionRepository {
@@ -167,6 +174,7 @@ export interface UsedDeviceAcquisitionRepository {
 }
 
 export interface RefurbishmentExpenseRepository {
+  findAll(): Promise<RefurbishmentExpense[]>;
   findByUnit(unitId: string): Promise<RefurbishmentExpense[]>;
   create(value: RefurbishmentExpense): Promise<RefurbishmentExpense>;
 }
@@ -212,7 +220,7 @@ export interface OperatingExpenseFilters {
 
 export interface OperatingExpenseRepository {
   nextExpenseNumber(now: Date): Promise<string>;
-  findAll(filters?: OperatingExpenseFilters, limit?: number): Promise<OperatingExpense[]>;
+  findAll(filters?: OperatingExpenseFilters, limit?: number | null): Promise<OperatingExpense[]>;
   findById(id: string): Promise<OperatingExpense | null>;
   create(value: OperatingExpense): Promise<OperatingExpense>;
   update(id: string, patch: Pick<OperatingExpense,
@@ -321,7 +329,15 @@ export interface WarrantyRepository {
  * NOT crash-safe (PLAN.md §13.1). In Phase 1 it becomes `prisma.$transaction`.
  * Services call this and don't care which they got.
  */
-export type Transactor = <T>(fn: (repositories: Repositories) => Promise<T>) => Promise<T>;
+export interface TransactionOptions {
+  maxWait?: number;
+  timeout?: number;
+}
+
+export type Transactor = <T>(
+  fn: (repositories: Repositories) => Promise<T>,
+  options?: TransactionOptions,
+) => Promise<T>;
 
 export interface Repositories {
   categories: CategoryRepository;
@@ -334,6 +350,7 @@ export interface Repositories {
   warranties: WarrantyRepository;
   customers: CustomerRepository;
   carts: CartRepository;
+  auditLogs: AuditLogRepository;
   sales: SaleRepository;
   saleSettlements: SaleSettlementRepository;
   usedDeviceAcquisitions: UsedDeviceAcquisitionRepository;

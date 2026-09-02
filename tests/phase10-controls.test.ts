@@ -19,6 +19,9 @@ describe('Phase 10 controlled selling', () => {
     expect(form).toContain('productStaffDiscountFieldsSchema.safeParse');
     expect(form).toContain('onSubmit={(event) =>');
     expect(form).toContain('noValidate');
+    expect(form).toContain('onInputCapture={(event) => receiveBrowserValue(event.target)}');
+    expect(form).toContain('onChangeCapture={(event) => receiveBrowserValue(event.target)}');
+    expect(form).toContain('clearedServerErrors.has(key)');
     expect(action).toContain("actor.role === 'ADMIN' ? money(fd, 'staffMaxDiscount') : 0");
     expect(action).toContain(': existing.staffMaxDiscount');
     expect(details).toContain('<Money value={raw.staffMaxDiscount} />');

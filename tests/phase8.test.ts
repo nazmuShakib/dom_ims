@@ -2,7 +2,15 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { normalizePhone } from '@/services/checkout';
+import type { CartDraft, Sale } from '@/domain/types';
+import type { Repositories } from '@/repositories';
+import {
+  addCalendarMonths,
+  checkoutCart,
+  checkoutTransactionTimeout,
+  isEmiFirstDueDateAllowed,
+  normalizePhone,
+} from '@/services/checkout';
 import { dhakaYear } from '@/lib/time';
 import { thermalPageHeightMm } from '@/lib/thermal-print-page';
 import {
@@ -37,7 +45,7 @@ describe('Phase 8 customer and checkout decisions', () => {
     const action = source('src/actions/checkout.ts');
     const service = source('src/services/checkout.ts');
     expect(workspace).toContain('regularCheckoutPaymentSchema.safeParse');
-    expect(workspace).toContain('error={regularErrors.customerId');
+    expect(workspace).toMatch(/regularErrors\.customerId\s*\? message\(regularErrors\.customerId\)/);
     expect(action).toContain('regularCheckoutPaymentSchema.parse');
     expect(service).toContain('regularCheckoutPaymentSchema.parse');
   });
@@ -70,7 +78,9 @@ describe('Phase 8 customer and checkout decisions', () => {
     expect(form).toContain("error={fieldError('phone')}");
     expect(action).toContain('createCustomerSchema.safeParse({');
     expect(action).toContain('fieldErrors: customerFieldErrors(parsed.error)');
-    expect(checkout).toContain('<CreateCustomerForm onCreated={chooseCustomer} stacked />');
+    expect(checkout).toContain('<CreateCustomerForm');
+    expect(checkout).toContain('chooseCustomer(customerId)');
+    expect(checkout).toContain('setCreatingCustomer(false)');
     expect(action).toContain('customerId: customer.id');
   });
 
@@ -127,6 +137,20 @@ describe('Phase 8 customer and checkout decisions', () => {
 
   it('numbers invoices by the Dhaka calendar year', () => {
     expect(dhakaYear(new Date('2026-12-31T20:00:00.000Z'))).toBe(2027);
+  });
+
+  it('validates EMI due-date boundaries by the Dhaka calendar day', () => {
+    const justAfterDhakaMidnight = new Date('2026-08-15T18:30:00.000Z');
+    expect(isEmiFirstDueDateAllowed(new Date('2026-08-15T00:00:00.000Z'), justAfterDhakaMidnight)).toBe(false);
+    expect(isEmiFirstDueDateAllowed(new Date('2026-08-16T00:00:00.000Z'), justAfterDhakaMidnight)).toBe(true);
+    expect(isEmiFirstDueDateAllowed(new Date('2026-09-16T00:00:00.000Z'), justAfterDhakaMidnight)).toBe(true);
+    expect(isEmiFirstDueDateAllowed(new Date('2026-09-17T00:00:00.000Z'), justAfterDhakaMidnight)).toBe(false);
+  });
+
+  it('clamps month-based warranties to the final valid calendar day', () => {
+    expect(addCalendarMonths('2026-01-31T10:30:00.000Z', 1)).toBe('2026-02-28T10:30:00.000Z');
+    expect(addCalendarMonths('2024-01-31T10:30:00.000Z', 1)).toBe('2024-02-29T10:30:00.000Z');
+    expect(addCalendarMonths('2026-12-31T10:30:00.000Z', 2)).toBe('2027-02-28T10:30:00.000Z');
   });
 
   it('filters completed and voided invoices independently of payment status', () => {
@@ -202,7 +226,7 @@ describe('Phase 8 customer and checkout decisions', () => {
     expect(workspace).toMatch(/t\(["']checkout\.previewTradeInDevice["']\)/);
     expect(workspace).toContain('cart.tradeInDraft.serialNo');
     expect(workspace).toContain('cart.tradeInDraft.acquisitionValue');
-    expect(workspace).toContain('<form action={completeAction}');
+    expect(workspace).toContain('<form id="checkout-form" action={completeAction}');
     expect(workspace).toMatch(/t\(["']checkout\.yesComplete["']\)/);
   });
 
@@ -268,10 +292,13 @@ describe('Phase 8 customer and checkout decisions', () => {
     expect(service).toContain('position: item.position');
     expect(action).not.toContain("action: 'cart.items_reorder'");
     expect(repository).not.toContain('async reorderItems');
-    expect(workspace).toContain('cursor-grab active:cursor-grabbing');
+    expect(workspace).toContain('<GripVertical aria-hidden="true"');
+    expect(workspace).toContain('shrink-0 touch-none');
     expect(workspace).toContain('data-cart-line-id={line.id}');
-    expect(workspace).toMatch(/closest\(\s*["']input, button, select, textarea, a, label["']/);
-    expect(workspace).toContain('onPointerMove');
+    expect(workspace).not.toContain('closest(\n                          "input, button, select, textarea, a, label"');
+    expect(workspace).toContain('t("checkout.positionOf"');
+    expect(workspace).toContain('t("checkout.movedPosition"');
+    expect(workspace).toContain('window.addEventListener("pointermove", move, true)');
     expect(workspace).toContain('element.animate(');
     expect(workspace).toContain('duration: 420');
     expect(workspace).toContain('element.offsetHeight / 2');
@@ -280,18 +307,175 @@ describe('Phase 8 customer and checkout decisions', () => {
     expect(workspace).toMatch(/event\.key === ["']ArrowUp["']/);
     expect(workspace).toMatch(/event\.key === ["']ArrowDown["']/);
   });
+
+  it('keeps high-frequency checkout controls visible and scanner feedback recoverable', () => {
+    const workspace = source('src/components/checkout/CheckoutWorkspace.tsx');
+    const items = source('src/components/checkout/CheckoutItemCombobox.tsx');
+    const customers = source('src/components/checkout/CustomerCombobox.tsx');
+
+    expect(workspace).toContain('setHighlightedLineId(lineId)');
+    expect(workspace).toContain('scrollIntoView({ behavior: "smooth", block: "nearest" })');
+    expect(workspace).toContain('t("checkout.undoLastScan")');
+    expect(workspace).toContain('const playScanTone = useCallback');
+    expect(workspace).not.toContain('scanSoundEnabled');
+    expect(workspace).toContain('<details className="mt-4');
+    expect(workspace).not.toContain('lg:sticky lg:bottom-4');
+    expect(workspace).not.toContain('fixed inset-x-3 bottom-3');
+    expect(workspace).toContain('className="h-11 w-full');
+    expect(workspace).toContain('t("checkout.cartUnits"');
+    expect(workspace).toContain('t("checkout.downPaymentMethod")');
+    expect(workspace).toContain('identificationLabel');
+    expect(workspace).toContain('const hasEmiBalanceAdjustment = isEmi && (tradeInCredit > 0 || downPayment > 0)');
+    expect(workspace).toContain('{hasEmiBalanceAdjustment && (');
+    expect(workspace).toContain('{!isEmi && tradeInCredit > 0 && (');
+    expect(workspace).toContain('shadow-2xl shadow-signal/20 backdrop-blur');
+    expect(workspace).toContain('const NOTIFICATION_DURATION_MS = 7_000');
+    expect(workspace).toContain('window.addEventListener("pointermove", move, true)');
+    expect(workspace).toContain('window.addEventListener("pointerup", finishLineDrag, true)');
+    expect(workspace).not.toContain('setPointerCapture');
+    expect(items).toContain('MAX_VISIBLE_RESULTS = 50');
+    expect(customers).toContain('MAX_VISIBLE_RESULTS = 50');
+  });
 });
 
 describe('Phase 8 stock and invoice invariants', () => {
   const checkout = source('src/services/checkout.ts');
+  const cartId = '019fe5d0-f89c-7000-8000-000000000010';
+  const actorId = '019fe5d0-f89c-7000-8000-000000000011';
+  const checkoutInput = (overrides: Partial<Parameters<typeof checkoutCart>[0]> = {}) => ({
+    cartId,
+    actorId,
+    actorName: 'Checkout actor',
+    actorRole: 'STAFF' as const,
+    idempotencyKey: 'checkout-replay-key',
+    lines: [{
+      clientId: 'line-1',
+      productId: '019fe5d0-f89c-7000-8000-000000000012',
+      unitId: null,
+      quantity: 1,
+      actualUnitPrice: 10_000,
+    }],
+    customerId: null,
+    paymentMethod: 'CASH' as const,
+    tradeInPayoutMethod: 'CASH' as const,
+    paymentStatus: 'PAID' as const,
+    reference: null,
+    note: null,
+    isEmi: false,
+    emiTermMonths: null,
+    emiDownPayment: 0,
+    emiFirstDueDate: null,
+    identificationType: null,
+    identificationNumber: null,
+    auditIp: null,
+    ...overrides,
+  });
+
+  function transactionOnly(tx: Partial<Repositories>): Repositories {
+    return {
+      transaction: (fn) => fn(tx as Repositories),
+    } as Repositories;
+  }
 
   it('completes the sale inside one repository transaction with concurrency guards', () => {
-    expect(checkout).toContain('return db.transaction(async (tx)');
+    const action = source('src/actions/checkout.ts');
+    expect(checkout).toContain('return repositories.transaction(async (tx)');
     expect(checkout).toContain("transitionStatus(unit.id, 'IN_STOCK', 'SOLD'");
     expect(checkout).toContain('tx.products._applyQuantityDelta');
     expect(checkout).toContain('tx.movements.record');
     expect(checkout).toContain('tx.sales.createItem');
+    expect(checkout).toContain('await tx.auditLogs.create');
+    expect(checkout).toContain("action: 'sale.complete'");
+    expect(checkout.indexOf('await tx.auditLogs.create')).toBeLessThan(checkout.lastIndexOf('await tx.carts.delete(cart.id)'));
+    expect(action).not.toContain("action: 'sale.complete'");
+    expect(action).toContain('const auditIp = await requestAuditIp()');
     expect(checkout).toContain('await tx.carts.delete(cart.id)');
+  });
+
+  it('re-authorizes trade-ins at commit time', () => {
+    expect(checkout).toContain("hasPermission(input.actorRole, 'MANAGE_USED_DEVICES')");
+    expect(checkout).toContain('Manager or Admin approval is required to complete a checkout with a trade-in.');
+  });
+
+  it('blocks a demoted seller from accepting a previously staged trade-in', async () => {
+    const cart = { id: cartId, actorId, tradeInDraft: {} } as CartDraft;
+    const tx = {
+      sales: { findByIdempotencyKey: async () => null },
+      carts: { findByIdForUpdate: async () => cart },
+    } as unknown as Repositories;
+
+    await expect(checkoutCart(checkoutInput(), transactionOnly(tx)))
+      .rejects.toThrow('Manager or Admin approval');
+  });
+
+  it('binds idempotent replays to the locked seller cart', () => {
+    const schema = source('prisma/schema.prisma');
+    const repository = source('src/repositories/prisma/index.ts');
+    const migration = source('prisma/migrations/20260901150000_checkout_replay_binding/migration.sql');
+    expect(schema).toContain('checkoutCartId String?    @unique');
+    expect(repository).toContain('findByIdForUpdate');
+    expect(repository).toContain('FOR UPDATE');
+    expect(checkout).toContain('replay.checkoutCartId !== input.cartId');
+    expect(checkout).toContain('await tx.carts.findByIdForUpdate(input.cartId)');
+    expect(migration).toContain('CREATE UNIQUE INDEX "sales_checkoutCartId_key"');
+  });
+
+  it('returns a matching replay after a concurrent checkout deletes the locked cart', async () => {
+    const replay = { actorId, checkoutCartId: cartId } as Sale;
+    let replayLookups = 0;
+    const tx = {
+      sales: {
+        findByIdempotencyKey: async () => {
+          replayLookups += 1;
+          return replayLookups === 1 ? null : replay;
+        },
+      },
+      carts: { findByIdForUpdate: async () => null },
+    } as unknown as Repositories;
+
+    await expect(checkoutCart(checkoutInput(), transactionOnly(tx))).resolves.toBe(replay);
+    expect(replayLookups).toBe(2);
+  });
+
+  it('rejects an idempotency key replayed from another seller or cart', async () => {
+    const replay = { actorId: 'different-actor', checkoutCartId: cartId } as Sale;
+    const tx = {
+      sales: { findByIdempotencyKey: async () => replay },
+    } as unknown as Repositories;
+
+    await expect(checkoutCart(checkoutInput(), transactionOnly(tx)))
+      .rejects.toThrow('different cart or seller');
+  });
+
+  it('keeps EMI line and total validation aligned with PostgreSQL', () => {
+    const workspace = source('src/components/checkout/CheckoutWorkspace.tsx');
+    expect(checkout).toContain('row.item.actualUnitPrice % 100 !== 0');
+    expect(checkout).toContain('EMI total must be greater than zero.');
+    expect(workspace).toContain('const emiPriceIsZero');
+    expect(workspace).toContain("t('checkout.positiveEmiPrice')");
+  });
+
+  it('scales the interactive transaction timeout for large checkout carts', () => {
+    const repository = source('src/repositories/prisma/index.ts');
+    expect(checkoutTransactionTimeout(1)).toBe(15_000);
+    expect(checkoutTransactionTimeout(250)).toBe(110_000);
+    expect(checkoutTransactionTimeout(10_000)).toBe(120_000);
+    expect(checkout).toContain('{ timeout: checkoutTransactionTimeout(input.lines.length) }');
+    expect(repository).toContain('timeout: options?.timeout ?? 15_000');
+  });
+
+  it('preserves the browser draft until server-backed discard succeeds', () => {
+    const discard = source('src/components/checkout/DiscardDraftControl.tsx');
+    const workspace = source('src/components/checkout/CheckoutWorkspace.tsx');
+    expect(discard).toContain('if (!state.ok) return;');
+    expect(discard).toContain('onDiscard();');
+    expect(discard).not.toContain('onSubmit={onDiscard}');
+    expect(discard).toContain('role="alert"');
+    const expiry = workspace.slice(
+      workspace.indexOf('const expireDraft'),
+      workspace.indexOf('function requestCheckoutConfirmation'),
+    );
+    expect(expiry.indexOf('if (result.error)')).toBeLessThan(expiry.lastIndexOf('discardLocalDraft();'));
   });
 
   it('keeps SaleItem lean and derives movement-owned invoice values', () => {

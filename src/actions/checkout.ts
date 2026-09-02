@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { z } from 'zod';
 
-import { writeAudit } from '@/lib/audit';
+import { requestAuditIp, writeAudit } from '@/lib/audit';
 import { requireCapability } from '@/lib/session';
 import { db } from '@/repositories';
 import {
@@ -207,6 +207,7 @@ export async function checkoutAction(
       identificationType: null,
       identificationNumber: null,
     };
+    const auditIp = await requestAuditIp();
     const customerId = str(fd, 'customerId');
     const regularPayment = !isEmi ? regularCheckoutPaymentSchema.parse({
       customerId,
@@ -225,25 +226,10 @@ export async function checkoutAction(
       paymentStatus: (regularPayment?.paymentStatus ?? 'UNPAID') as PaymentStatus,
       reference: str(fd, 'reference'),
       note: str(fd, 'note'),
+      auditIp,
       ...details,
     });
     saleId = sale.id;
-    await writeAudit({
-      actorId: actor.id,
-      action: 'sale.complete',
-      entity: 'Sale',
-      entityId: sale.id,
-      after: {
-        invoiceNumber: sale.invoiceNumber,
-        customerId: sale.customerId,
-        paymentMethod: sale.paymentMethod,
-        paymentStatus: sale.paymentStatus,
-        subtotal: sale.subtotal,
-        discount: sale.discount,
-        total: sale.total,
-        tradeInCredit: sale.tradeInCredit,
-      },
-    });
   } catch (error) {
     return { error: message(error) };
   }

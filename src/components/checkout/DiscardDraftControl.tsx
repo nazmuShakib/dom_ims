@@ -22,8 +22,10 @@ export function DiscardDraftControl({
   const [state, action, pending] = useActionState(discardCartAction, {});
 
   useEffect(() => {
-    if (state.ok) setOpen(false);
-  }, [state.ok]);
+    if (!state.ok) return;
+    onDiscard();
+    setOpen(false);
+  }, [onDiscard, state.ok]);
 
   useEffect(() => {
     if (!open) return;
@@ -70,12 +72,17 @@ export function DiscardDraftControl({
                 : t('checkout.discardEmpty')}
               {' '}{t('checkout.inventoryUnchanged')}
             </p>
+            {state.error && (
+              <p role="alert" className="mt-3 rounded-[3px] border border-out/30 bg-out/5 p-2 text-[12px] text-out">
+                {message(state.error)}
+              </p>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setOpen(false)} autoFocus>
                 {t('checkout.keepDraft')}
               </Button>
               {hasTradeIn ? (
-                <form action={action} onSubmit={onDiscard}>
+                <form action={action}>
                   <input type="hidden" name="cartId" value={cartId} />
                   <Button type="submit" variant="danger" disabled={pending}>
                     {pending ? t('checkout.discarding') : t('checkout.discard')}

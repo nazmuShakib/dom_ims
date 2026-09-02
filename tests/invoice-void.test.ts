@@ -16,6 +16,7 @@ function sale(overrides: Partial<Sale> = {}): Sale {
     id: '019fe5d0-f89c-7000-8000-000000000001',
     invoiceNumber: 'INV-2026-000001',
     idempotencyKey: 'checkout-idempotency',
+    checkoutCartId: '019fe5d0-f89c-7000-8000-000000000002',
     status: 'COMPLETED',
     customerId: null,
     customerName: null,

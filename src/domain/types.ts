@@ -376,6 +376,7 @@ export interface Sale {
   id: string;
   invoiceNumber: string;
   idempotencyKey: string;
+  checkoutCartId: string | null;
   status: SaleStatus;
   customerId: string | null;
   customerName: string | null;

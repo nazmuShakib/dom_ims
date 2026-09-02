@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { OperatingExpense, Product, ProductUnit, Sale, StockMovement, Supplier, User } from '@/domain/types';
+import type { OperatingExpense, Product, ProductUnit, RefurbishmentExpense, Sale, StockMovement, Supplier, User } from '@/domain/types';
 import { searchInventory } from '@/lib/search';
 import type { Repositories } from '@/repositories';
 import { getDashboard } from '@/services/dashboard';
@@ -77,6 +77,11 @@ const operatingExpense: OperatingExpense = {
   updatedAt: '2026-07-10T18:00:00.000Z',
 };
 
+const refurbishmentExpense: RefurbishmentExpense = {
+  id: 'refurbishment-1', unitId: 'unit-in', description: 'Replacement display', amount: 200,
+  actorId: user.id, createdAt: '2026-07-17T06:00:00.000Z',
+};
+
 function repositories(search = vi.fn(async () => [serialProduct, bulkProduct])): Repositories {
   return {
     products: {
@@ -96,6 +101,7 @@ function repositories(search = vi.fn(async () => [serialProduct, bulkProduct])):
     movements: { findByDateRange: vi.fn(async () => movements) },
     sales: { findVoidedByDateRange: vi.fn(async () => []) },
     operatingExpenses: { findAll: vi.fn(async () => [operatingExpense]) },
+    refurbishmentExpenses: { findAll: vi.fn(async () => []) },
   } as unknown as Repositories;
 }
 
@@ -120,8 +126,54 @@ describe('Phase 4 dashboard', () => {
     expect(dashboard.recentActivity.some((item) => item.reason === 'CORRECTION')).toBe(true);
     expect(dashboard.dailyOperations.reduce((total, day) => total + day.stockIn, 0)).toBe(0);
     expect(dashboard.dailyOperations.reduce((total, day) => total + day.stockOut, 0)).toBe(1);
-    expect(dashboard.topMovers.find((item) => item.productId === bulkProduct.id)?.movedUnits).toBe(0);
+    expect(dashboard.topMovers.find((item) => item.productId === bulkProduct.id)).toBeUndefined();
     expect(dashboard.topMovers.find((item) => item.productId === serialProduct.id)?.movedUnits).toBe(1);
+  });
+
+  it('does not classify newly received, never-sold stock as dead stock', async () => {
+    const newlyReceived = movement({
+      id: 'new-receipt', type: 'IN', reason: 'RECEIVE', productId: bulkProduct.id,
+      quantity: 5, unitCost: 100, unitPrice: null, createdAt: '2026-07-17T06:00:00.000Z',
+    });
+    const testRepositories = repositories();
+    testRepositories.products.findAll = vi.fn(async () => [bulkProduct]);
+    testRepositories.movements.findByDateRange = vi.fn(async () => [newlyReceived]);
+
+    const dashboard = await getDashboard('STAFF', now, testRepositories);
+    expect(dashboard.deadStock).toEqual([]);
+  });
+
+  it('loads every active operating expense instead of applying the list-page cap', async () => {
+    const expenses = Array.from({ length: 600 }, (_, index) => ({
+      ...operatingExpense,
+      id: `expense-${index}`,
+      expenseNumber: `EXP-2026-${String(index).padStart(6, '0')}`,
+      amount: 1,
+    }));
+    const testRepositories = repositories();
+    testRepositories.operatingExpenses.findAll = vi.fn(async () => expenses);
+
+    const dashboard = await getDashboard('ADMIN', now, testRepositories);
+    if (!dashboard.canSeeFinancials) throw new Error('Expected financial dashboard');
+    expect(dashboard.monthOperatingExpenses).toBe(600);
+    expect(testRepositories.operatingExpenses.findAll).toHaveBeenCalledWith(expect.any(Object), null);
+  });
+
+  it('adds recorded refurbishment costs to the historical stock-value line', async () => {
+    const receipt = movement({
+      id: 'used-receipt', type: 'IN', reason: 'RECEIVE', quantity: 1,
+      unitId: 'unit-in', unitCost: 500, unitPrice: null, createdAt: '2026-06-01T00:00:00.000Z',
+    });
+    const testRepositories = repositories();
+    testRepositories.products.findAll = vi.fn(async () => [serialProduct]);
+    testRepositories.units.findByProduct = vi.fn(async () => [{ ...units[0]!, costPrice: 700 }]);
+    testRepositories.movements.findByDateRange = vi.fn(async () => [receipt]);
+    testRepositories.refurbishmentExpenses.findAll = vi.fn(async () => [refurbishmentExpense]);
+
+    const dashboard = await getDashboard('ADMIN', now, testRepositories);
+    if (!dashboard.canSeeFinancials) throw new Error('Expected financial dashboard');
+    expect(dashboard.stockValueAtCost).toBe(700);
+    expect(dashboard.dailyFinancials.at(-1)?.stockValue).toBe(700);
   });
 
   it('deducts damage/loss and effective shop-use or gift cost from net operating profit', async () => {
@@ -231,6 +283,8 @@ describe('Phase 4 dashboard', () => {
     expect(kpis).toContain("note={t('dashboard.revenueHelp')}");
     expect(kpis).toContain("note={t('dashboard.cogsHelp')}");
     expect(kpis).toContain("note={t('dashboard.operatingExpensesHelp')}");
+    expect(kpis).toContain('changePreference="lower-better"');
+    expect(kpis).toContain("t('dashboard.fromZero')");
     expect(kpis).not.toContain('overflow-hidden border-t-[3px]');
   });
 
@@ -241,11 +295,30 @@ describe('Phase 4 dashboard', () => {
     expect(charts).toContain('<ComposedChart');
     expect(charts).toContain('stackOffset="sign"');
     expect(charts).toContain('<ReferenceLine y={0}');
-    expect(charts).toContain('<Bar dataKey="stockIn"');
-    expect(charts).toContain('<Bar dataKey="stockOut"');
+    expect(charts).toContain('<Bar dataKey="stockInPlot"');
+    expect(charts).toContain('<Bar dataKey="stockOutPlot"');
     expect(charts.match(/stackId="movement"/g)).toHaveLength(2);
     expect(charts.match(/maxBarSize=\{22\}/g)).toHaveLength(2);
-    expect(charts).toContain('<Line type="monotone" dataKey="net"');
+    expect(charts).toContain('<Line type="linear" dataKey="netPlot"');
+    expect(charts).toContain('splitSignedIntegerAxis');
+    expect(charts).toContain('operationsData.flatMap((point) => [point.stockIn, point.stockOut, point.net]),\n    2,');
+    expect(charts).toContain('domain={operationsAxis.domain}');
+    expect(charts).toContain('ticks={operationsAxis.ticks}');
+    expect(charts).toContain('tickFormatter={operationsAxis.formatTick}');
+    expect(charts).toContain('interval={0}');
+    expect(charts).toContain('splitSignedNiceAxis');
+    expect(charts).toContain('salesData?.flatMap((point) => [point.revenue, point.margin, point.refunds]) ?? [0],\n    8,');
+    expect(charts).toContain('dataKey="revenuePlot"');
+    expect(charts).toContain('dataKey="marginPlot"');
+    expect(charts).toContain('dataKey="refundsPlot"');
+    expect(charts).not.toContain('yAxisId="marginRate"');
+    expect(charts).not.toContain('dataKey="marginRate"');
+    expect(charts).toContain('<AccessibleChartTable');
+    expect(charts).toContain('<div className="sr-only">');
+    expect(charts).not.toContain('<table className="sr-only">');
+    expect(charts).toContain('aria-hidden="true"');
+    expect(charts).toContain("dot={period === 'day'}");
+    expect(charts).not.toContain('Math.abs(Number(value)).toLocaleString');
     expect(charts).not.toContain('<AreaChart data={operations}');
   });
 

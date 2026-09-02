@@ -19,6 +19,8 @@ interface ItemOption {
   searchable: string;
 }
 
+const MAX_VISIBLE_RESULTS = 50;
+
 function rank(option: ItemOption, query: string): number {
   const primary = option.primary.toLowerCase();
   const secondary = option.secondary.toLowerCase();
@@ -38,6 +40,7 @@ function CheckoutItemCombobox({
   placeholder: string;
   emptyMessage: string;
 }) {
+  const { t } = useI18n();
   const listboxId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -53,10 +56,12 @@ function CheckoutItemCombobox({
       .filter((option) => option.searchable.includes(normalizedQuery))
       .sort((left, right) => rank(left, normalizedQuery) - rank(right, normalizedQuery));
   }, [options, query]);
+  const visibleOptions = filteredOptions.slice(0, MAX_VISIBLE_RESULTS);
+  const hiddenResultCount = filteredOptions.length - visibleOptions.length;
 
   useEffect(() => {
-    setActiveIndex((current) => Math.max(0, Math.min(current, filteredOptions.length - 1)));
-  }, [filteredOptions.length]);
+    setActiveIndex((current) => Math.max(0, Math.min(current, visibleOptions.length - 1)));
+  }, [visibleOptions.length]);
 
   useEffect(() => {
     const closeOnOutsideClick = (event: MouseEvent) => {
@@ -86,7 +91,7 @@ function CheckoutItemCombobox({
     setOpen(true);
     setQuery("");
     const selectedIndex = selected
-      ? options.findIndex((option) => option.id === selected.id)
+      ? options.slice(0, MAX_VISIBLE_RESULTS).findIndex((option) => option.id === selected.id)
       : 0;
     setActiveIndex(Math.max(0, selectedIndex));
   }
@@ -101,22 +106,22 @@ function CheckoutItemCombobox({
     if (event.key === "ArrowDown") {
       event.preventDefault();
       if (!open) openList();
-      else if (filteredOptions.length > 0) {
-        setActiveIndex((current) => (current + 1) % filteredOptions.length);
+      else if (visibleOptions.length > 0) {
+        setActiveIndex((current) => (current + 1) % visibleOptions.length);
       }
       return;
     }
     if (event.key === "ArrowUp") {
       event.preventDefault();
       if (!open) openList();
-      else if (filteredOptions.length > 0) {
-        setActiveIndex((current) => (current - 1 + filteredOptions.length) % filteredOptions.length);
+      else if (visibleOptions.length > 0) {
+        setActiveIndex((current) => (current - 1 + visibleOptions.length) % visibleOptions.length);
       }
       return;
     }
     if (event.key === "Enter" && open) {
       event.preventDefault();
-      const option = filteredOptions[activeIndex];
+      const option = visibleOptions[activeIndex];
       if (option) selectOption(option);
       return;
     }
@@ -139,7 +144,7 @@ function CheckoutItemCombobox({
           aria-autocomplete="list"
           aria-expanded={open}
           aria-controls={listboxId}
-          aria-activedescendant={open && filteredOptions.length > 0
+          aria-activedescendant={open && visibleOptions.length > 0
             ? `${listboxId}-option-${activeIndex}`
             : undefined}
           className="checkout-item-combobox-input h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] text-ink outline-none placeholder:text-graphite/80"
@@ -160,7 +165,7 @@ function CheckoutItemCombobox({
           <button
             type="button"
             className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] text-graphite transition-colors hover:bg-plate hover:text-ink"
-            aria-label={placeholder}
+            aria-label={t("checkout.clearItemSelection")}
             onClick={() => {
               setValue("");
               setQuery("");
@@ -173,7 +178,7 @@ function CheckoutItemCombobox({
           <button
             type="button"
             className="mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-[3px] text-graphite transition-colors hover:bg-plate hover:text-ink"
-            aria-label={placeholder}
+            aria-label={t("checkout.openItemList")}
             onClick={() => {
               if (open) {
                 setOpen(false);
@@ -195,7 +200,7 @@ function CheckoutItemCombobox({
           role="listbox"
           className="absolute z-50 mt-1 max-h-64 w-full overflow-y-auto rounded-[3px] border border-rule bg-card py-1 shadow-lg"
         >
-          {filteredOptions.length > 0 ? filteredOptions.map((option, index) => (
+          {visibleOptions.length > 0 ? visibleOptions.map((option, index) => (
             <div
               key={option.id}
               id={`${listboxId}-option-${index}`}
@@ -216,6 +221,11 @@ function CheckoutItemCombobox({
             </div>
           )) : (
             <p className="px-3 py-5 text-center text-[12px] text-graphite">{emptyMessage}</p>
+          )}
+          {hiddenResultCount > 0 && (
+            <p className="border-t border-rule px-3 py-2 text-[11px] text-graphite">
+              {t("checkout.moreMatches", { count: hiddenResultCount })}
+            </p>
           )}
         </div>
       )}
@@ -269,9 +279,9 @@ export function CheckoutUnitCombobox({
   const options = useMemo<ItemOption[]>(() => units.map((unit) => ({
     id: unit.id,
     primary: unit.serialNo,
-    secondary: `${unit.productName} · ${unit.sku}${unit.usedGrade ? ` · ${unit.usedGrade.replace("GRADE_", "Grade ")}` : ""}`,
+    secondary: `${unit.productName} · ${unit.sku}${unit.usedGrade ? ` · ${unit.usedGrade.replace("GRADE_", `${t("used.grade")} `)}` : ""}`,
     searchable: `${unit.serialNo} ${unit.productName} ${unit.sku}`.toLowerCase(),
-  })), [units]);
+  })), [t, units]);
 
   return (
     <CheckoutItemCombobox

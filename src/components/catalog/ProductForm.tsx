@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState, useRef, useState } from 'react';
+import { useActionState, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Brand, Category, Product } from '@/domain/types';
 import { parseBDT, toTaka } from '@/lib/money';
@@ -27,10 +27,25 @@ export function ProductForm({
 }) {
   const [state, formAction, pending] = useActionState<ActionState, FormData>(action, {});
   const { t, message } = useI18n();
-  const err = (k: string) => state.fieldErrors?.[k];
+  const [clearedServerErrors, setClearedServerErrors] = useState<Set<string>>(() => new Set());
+  const err = (key: string) => clearedServerErrors.has(key)
+    ? undefined
+    : state.fieldErrors?.[key];
   const editing = Boolean(product);
   const [staffDiscountError, setStaffDiscountError] = useState<string>();
   const barcodeRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setClearedServerErrors(new Set());
+  }, [state.fieldErrors]);
+
+  const receiveBrowserValue = (target: EventTarget) => {
+    if (!(target instanceof HTMLInputElement)
+      && !(target instanceof HTMLSelectElement)
+      && !(target instanceof HTMLTextAreaElement)) return;
+    if (!target.name || !state.fieldErrors?.[target.name]) return;
+    setClearedServerErrors((current) => new Set(current).add(target.name));
+  };
 
   const validateStaffDiscount = (value: string, salePrice?: string): boolean => {
     if (!canManageStaffDiscount) return true;
@@ -53,6 +68,8 @@ export function ProductForm({
     <form
       action={formAction}
       noValidate
+      onInputCapture={(event) => receiveBrowserValue(event.target)}
+      onChangeCapture={(event) => receiveBrowserValue(event.target)}
       onSubmit={(event) => {
         if (!canManageStaffDiscount) return;
         const form = event.currentTarget;
@@ -86,7 +103,7 @@ export function ProductForm({
               name="sku"
               required
               defaultValue={product?.sku}
-              placeholder="SAM-A55-8-256"
+              placeholder={t('products.productCodePlaceholder')}
             />
           </Field>
 
@@ -123,13 +140,17 @@ export function ProductForm({
                 name="name"
                 required
                 defaultValue={product?.name}
-                placeholder="Samsung Galaxy A55 (8/256GB)"
+                placeholder={t('products.namePlaceholder')}
               />
             </Field>
           </div>
 
           <Field label={t('products.modelNumber')} error={err('model')}>
-            <MonoInput name="model" defaultValue={product?.model ?? ''} placeholder="SM-A556E" />
+            <MonoInput
+              name="model"
+              defaultValue={product?.model ?? ''}
+              placeholder={t('products.modelPlaceholder')}
+            />
           </Field>
 
           <Field label={t('common.category')} error={err('categoryId')}>

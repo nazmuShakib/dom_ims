@@ -11,7 +11,13 @@ import {
   type FormEvent,
   type HTMLAttributes,
 } from "react";
-import { Trash2 } from "lucide-react";
+import {
+  GripVertical,
+  ReceiptText,
+  Trash2,
+  Undo2,
+  UserPlus,
+} from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -24,6 +30,7 @@ import {
 } from "@/actions/checkout";
 import { ScannerInput } from "@/components/search/ScannerInput";
 import { DiscardDraftControl } from "@/components/checkout/DiscardDraftControl";
+import { useCheckoutScanner } from "@/components/checkout/useCheckoutScanner";
 import { CustomerCombobox } from "@/components/checkout/CustomerCombobox";
 import {
   CheckoutProductCombobox,
@@ -103,9 +110,10 @@ export interface CheckoutLine {
 
 const LOCAL_DRAFT_VERSION = 1;
 const LOCAL_DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const NOTIFICATION_DURATION_MS = 7_000;
 
-function previewDate(value: string): string {
-  return new Intl.DateTimeFormat("en-BD", {
+function previewDate(value: string, locale: "en" | "bn"): string {
+  return new Intl.DateTimeFormat(locale === "bn" ? "bn-BD" : "en-BD", {
     timeZone: "Asia/Dhaka",
     dateStyle: "medium",
   }).format(new Date(`${value}T00:00:00+06:00`));
@@ -133,9 +141,9 @@ interface StoredCheckoutDraft {
 function Message({ state }: { state: CheckoutActionState }) {
   const { message } = useI18n();
   if (state.error)
-    return <p className="mt-2 text-[12px] text-out">{message(state.error)}</p>;
+    return <p role="alert" className="mt-2 text-[12px] text-out">{message(state.error)}</p>;
   if (state.ok)
-    return <p className="mt-2 text-[12px] text-ok">{message(state.ok)}</p>;
+    return <p role="status" aria-live="polite" className="mt-2 text-[12px] text-ok">{message(state.ok)}</p>;
   return null;
 }
 
@@ -144,6 +152,9 @@ function CartLineEditor({
   dragProps,
   dragging,
   dragDisabled,
+  highlighted,
+  position,
+  lineCount,
   onChange,
   onRemove,
   onValidityChange,
@@ -151,9 +162,12 @@ function CartLineEditor({
   isEmi,
 }: {
   line: CheckoutLine;
-  dragProps: HTMLAttributes<HTMLDivElement>;
+  dragProps: HTMLAttributes<HTMLButtonElement>;
   dragging: boolean;
   dragDisabled: boolean;
+  highlighted: boolean;
+  position: number;
+  lineCount: number;
   onChange: (lineId: string, patch: Pick<CheckoutLine, "quantity" | "actualUnitPrice">) => void;
   onRemove: (lineId: string) => void;
   onValidityChange: (lineId: string, valid: boolean) => void;
@@ -177,8 +191,9 @@ function CartLineEditor({
       : line.actualUnitPrice;
   const priceFormatValid = isEmi ? /^\d+$/.test(priceValue) : /^\d+(\.\d{1,2})?$/.test(priceValue);
   const emiPriceHasFraction = isEmi && /^\d+\.\d{1,2}$/.test(priceValue);
+  const emiPriceIsZero = isEmi && priceFormatValid && displayUnitPrice === 0;
   const priceBelowFloor = staffMinimumPrice !== null && displayUnitPrice < staffMinimumPrice;
-  const priceValid = priceFormatValid && !priceBelowFloor;
+  const priceValid = priceFormatValid && !emiPriceIsZero && !priceBelowFloor;
 
   useEffect(() => {
     setQuantityValue(String(line.quantity));
@@ -211,16 +226,26 @@ function CartLineEditor({
   return (
     <div
       data-cart-line-id={line.id}
-      tabIndex={dragDisabled ? undefined : 0}
-      {...dragProps}
       className={`border-b border-rule-soft px-4 py-3 transition-[background-color,box-shadow,transform] last:border-0 focus-visible:outline-2 focus-visible:outline-inset focus-visible:outline-signal ${
-        dragDisabled ? "" : "touch-none cursor-grab active:cursor-grabbing"
+        highlighted ? "bg-ok/10 ring-1 ring-inset ring-ok/40" : ""
       } ${dragging ? "relative z-10 bg-signal-wash shadow-md" : "hover:bg-plate/35"}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-[13px] font-medium">{line.productName}</p>
-          <p className="tnum text-[11px] text-graphite">{line.sku}</p>
+        <div className="flex min-w-0 items-start gap-2">
+          <button
+            type="button"
+            disabled={dragDisabled}
+            {...dragProps}
+            className="mt-0.5 inline-flex size-10 shrink-0 touch-none items-center justify-center rounded-[3px] border border-rule bg-card text-graphite transition-colors hover:border-signal hover:text-signal disabled:cursor-default disabled:opacity-35"
+          >
+            <GripVertical aria-hidden="true" className="size-5" />
+          </button>
+          <div className="min-w-0">
+            <p className="text-[13px] font-medium">{line.productName}</p>
+            <p className="tnum text-[11px] text-graphite">{line.sku}</p>
+            <p className="mt-1 text-[10px] text-graphite">
+              {t("checkout.positionOf", { position, count: lineCount })}
+            </p>
           {line.usedGrade && <p className="mt-1 text-[11px] font-medium text-signal">{line.usedGrade === 'REFURBISHED' ? t('used.refurbished') : `${t('used.usedPhone')} · ${line.usedGrade.replace('GRADE_', `${t('used.grade')} `)}`}</p>}
           {(line.warrantyDays || line.warrantyMonths) && (
             <p className="mt-1 text-[11px] text-graphite">
@@ -233,6 +258,7 @@ function CartLineEditor({
           <p className="mt-1 text-[11px] text-graphite">
             {t("checkout.listPrice", { price: formatBDT(line.listUnitPrice) })}
           </p>
+          </div>
         </div>
         <p className="tnum text-[13px] font-semibold">
           {formatBDT(
@@ -253,10 +279,10 @@ function CartLineEditor({
           </Field>
         ) : (
           <Field label={t("common.quantity")}>
-            <div className="inline-grid grid-cols-[2.25rem_4.5rem_2.25rem]">
+            <div className="inline-grid grid-cols-[2.5rem_4.5rem_2.5rem]">
               <button
                 type="button"
-                className="h-9 rounded-l-[3px] border border-rule bg-card text-[18px] leading-none text-ink transition-colors hover:border-signal hover:bg-signal-wash disabled:cursor-not-allowed disabled:opacity-40"
+                className="h-10 rounded-l-[3px] border border-rule bg-card text-[18px] leading-none text-ink transition-colors hover:border-signal hover:bg-signal-wash disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={t("checkout.decreaseQuantity")}
                 onClick={() => stepQuantity(-1)}
                 disabled={quantity <= 1}
@@ -264,7 +290,7 @@ function CartLineEditor({
                 −
               </button>
               <MonoInput
-                className="rounded-none px-1 text-center"
+                className="h-10 rounded-none px-1 text-center"
                 inputMode="numeric"
                 pattern="[0-9]*"
                 aria-label={t("common.quantity")}
@@ -286,7 +312,7 @@ function CartLineEditor({
               />
               <button
                 type="button"
-                className="h-9 rounded-r-[3px] border border-rule bg-card text-[18px] leading-none text-ink transition-colors hover:border-signal hover:bg-signal-wash disabled:cursor-not-allowed disabled:opacity-40"
+                className="h-10 rounded-r-[3px] border border-rule bg-card text-[18px] leading-none text-ink transition-colors hover:border-signal hover:bg-signal-wash disabled:cursor-not-allowed disabled:opacity-40"
                 aria-label={t("checkout.increaseQuantity")}
                 onClick={() => stepQuantity(1)}
                 disabled={quantity >= maximumQuantity}
@@ -304,13 +330,16 @@ function CartLineEditor({
               : undefined}
             error={emiPriceHasFraction
               ? t("checkout.wholeTakaEmiPrice")
+              : emiPriceIsZero ? t('checkout.positiveEmiPrice')
               : priceBelowFloor ? t('checkout.staffPriceTooLow') : undefined}
           >
             <MonoInput
               inputMode="decimal"
               step={isEmi ? "1" : "0.01"}
               required
-              min={staffMinimumPrice === null ? undefined : toTaka(staffMinimumPrice)}
+              min={isEmi
+                ? Math.max(1, toTaka(staffMinimumPrice ?? 0))
+                : staffMinimumPrice === null ? undefined : toTaka(staffMinimumPrice)}
               value={priceValue}
               onChange={(event) => {
                 const value = event.target.value;
@@ -318,6 +347,7 @@ function CartLineEditor({
                 const entered = Number(value);
                 const validFormat = isEmi ? /^\d+$/.test(value) : /^\d+(\.\d{1,2})?$/.test(value);
                 if (validFormat
+                  && (!isEmi || entered > 0)
                   && (staffMinimumPrice === null || Math.round(entered * 100) >= staffMinimumPrice)) {
                   onChange(line.id, {
                     quantity: line.quantity,
@@ -326,7 +356,7 @@ function CartLineEditor({
                 }
               }}
               onBlur={() => {
-                if (priceFormatValid && !priceBelowFloor) {
+                if (priceValid) {
                   onChange(line.id, { quantity: line.quantity, actualUnitPrice: displayUnitPrice });
                 }
               }}
@@ -379,7 +409,7 @@ export function CheckoutWorkspace({
   customers: Customer[];
   role: Role;
 }) {
-  const { t, message } = useI18n();
+  const { locale, t, message } = useI18n();
   const router = useRouter();
   const [checkoutKey, setCheckoutKey] = useState("");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
@@ -398,14 +428,23 @@ export function CheckoutWorkspace({
   const [regularErrors, setRegularErrors] = useState<Record<string, string>>({});
   const [confirmingCheckout, setConfirmingCheckout] = useState(false);
   const [confirmingTradeInRemoval, setConfirmingTradeInRemoval] = useState(false);
+  const [creatingCustomer, setCreatingCustomer] = useState(false);
+  const [highlightedLineId, setHighlightedLineId] = useState<string | null>(null);
+  const [lastScannedLine, setLastScannedLine] = useState<{
+    lineId: string;
+    previousQuantity: number | null;
+    productName: string;
+  } | null>(null);
   const [orderedLines, setOrderedLines] = useState(lines);
   const orderedLinesRef = useRef(lines);
   const scannerFormRef = useRef<HTMLFormElement>(null);
   const cartLinesRef = useRef<HTMLDivElement>(null);
   const previousLinePositionsRef = useRef<Map<string, DOMRect> | null>(null);
   const lineAnimationsRef = useRef<Map<string, Animation>>(new Map());
+  const scanHighlightTimerRef = useRef<number | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const draggingIdRef = useRef<string | null>(null);
+  const dragMovedRef = useRef(false);
   const [reorderState, setReorderState] = useState<CheckoutActionState>({});
   const [invalidLineIds, setInvalidLineIds] = useState<Set<string>>(
     () => new Set(),
@@ -470,8 +509,8 @@ export function CheckoutWorkspace({
   const expireDraft = useCallback(async () => {
     if (expiryInFlightRef.current) return;
     expiryInFlightRef.current = true;
-    discardLocalDraft();
     if (!cart.tradeInDraft) {
+      discardLocalDraft();
       expiryInFlightRef.current = false;
       return;
     }
@@ -483,6 +522,7 @@ export function CheckoutWorkspace({
       setAddState({ error: result.error });
       return;
     }
+    discardLocalDraft();
     router.refresh();
   }, [cart.id, cart.tradeInDraft, discardLocalDraft, router]);
 
@@ -679,13 +719,56 @@ export function CheckoutWorkspace({
   }, [confirmingCheckout, checkingOut]);
 
   useEffect(() => {
+    if (!creatingCustomer) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCreatingCustomer(false);
+    };
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [creatingCustomer]);
+
+  useEffect(
+    () => () => {
+      if (scanHighlightTimerRef.current !== null) {
+        window.clearTimeout(scanHighlightTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
     if (clearTradeInState.ok) setConfirmingTradeInRemoval(false);
   }, [clearTradeInState.ok]);
+
+  useEffect(() => {
+    if (!reorderState.ok && !reorderState.error) return;
+    const timer = window.setTimeout(
+      () => setReorderState({}),
+      NOTIFICATION_DURATION_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [reorderState.error, reorderState.ok]);
+
+  useEffect(() => {
+    if (!addState.ok && !addState.error) return;
+    const timer = window.setTimeout(
+      () => setAddState({}),
+      NOTIFICATION_DURATION_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [addState.error, addState.ok]);
 
   const quantityProducts = products.filter(
     (product) => product.trackingType === "QUANTITY",
   );
   const selectedCustomer = customers.find((customer) => customer.id === selectedCustomerId) ?? null;
+  const identificationLabel = identificationType === "NID"
+    ? t("checkout.nid")
+    : identificationType === "PASSPORT"
+      ? t("checkout.passport")
+      : identificationType === "BIRTH_CERTIFICATE"
+        ? t("checkout.birthCertificate")
+        : t("checkout.identificationType");
   const subtotal = useMemo(
     () =>
       orderedLines.reduce(
@@ -698,6 +781,10 @@ export function CheckoutWorkspace({
   const total = useMemo(
     () =>
       orderedLines.reduce((sum, line) => sum + line.actualUnitPrice * line.quantity, 0),
+    [orderedLines],
+  );
+  const totalUnits = useMemo(
+    () => orderedLines.reduce((sum, line) => sum + line.quantity, 0),
     [orderedLines],
   );
   const tradeInProduct = products.find((product) => product.id === cart.tradeInDraft?.productId);
@@ -715,56 +802,115 @@ export function CheckoutWorkspace({
   const tradeInCashPayout = isEmi ? 0 : Math.max(0, tradeInCredit - total);
   const downPayment = (() => { const value = Number(emiDownPayment); return Number.isFinite(value) ? Math.round(value * 100) : 0; })();
   const amountDue = Math.max(0, total - tradeInCredit - (isEmi ? downPayment : 0));
+  const hasEmiBalanceAdjustment = isEmi && (tradeInCredit > 0 || downPayment > 0);
   const priceAdjustment = total - subtotal;
 
-  const addLocalItem = (input: { identifier?: string; productId?: string; unitId?: string }) => {
+  const playScanTone = useCallback((success: boolean) => {
+    const AudioContextClass = window.AudioContext
+      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = success ? 880 : 220;
+    gain.gain.setValueAtTime(0.05, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.09);
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    oscillator.start();
+    oscillator.stop(context.currentTime + 0.09);
+    oscillator.addEventListener("ended", () => void context.close());
+  }, []);
+
+  const markScannedLine = useCallback((
+    lineId: string,
+    previousQuantity: number | null,
+    productName: string,
+  ) => {
+    setLastScannedLine({ lineId, previousQuantity, productName });
+    setHighlightedLineId(lineId);
+    if (scanHighlightTimerRef.current !== null) {
+      window.clearTimeout(scanHighlightTimerRef.current);
+    }
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(`[data-cart-line-id="${CSS.escape(lineId)}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    scanHighlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedLineId(null);
+      scanHighlightTimerRef.current = null;
+    }, 1800);
+    playScanTone(true);
+  }, [playScanTone]);
+
+  const addLocalItem = useCallback((
+    input: { identifier?: string; productId?: string; unitId?: string },
+    source: "scan" | "manual" = "manual",
+  ) => {
+    const fail = (error: string) => {
+      setAddState({ error });
+      if (source === "scan") playScanTone(false);
+    };
     const identifier = input.identifier?.trim();
+    const identifierKey = identifier?.toLocaleLowerCase('en-US');
     const unit = input.unitId
       ? units.find((entry) => entry.id === input.unitId)
-      : identifier ? units.find((entry) => entry.serialNo === identifier) : undefined;
+      : identifierKey
+        ? units.find((entry) => entry.serialNo.toLocaleLowerCase('en-US') === identifierKey)
+        : undefined;
     const product = unit
       ? products.find((entry) => entry.id === unit.productId)
       : input.productId
         ? products.find((entry) => entry.id === input.productId)
-        : identifier
-          ? products.find((entry) => entry.barcode === identifier || entry.sku === identifier)
+        : identifierKey
+          ? products.find((entry) => (
+              entry.barcode?.toLocaleLowerCase('en-US') === identifierKey
+              || entry.sku.toLocaleLowerCase('en-US') === identifierKey
+            ))
           : undefined;
     if (!product) {
-      setAddState({ error: "No product or device number matches that identifier." });
+      fail(t("checkout.noIdentifierMatch"));
       return;
     }
     if (product.trackingType === "SERIAL") {
       if (!unit) {
-        setAddState({ error: "Scan or select the exact device number/IMEI for this individually tracked product." });
+        fail(t("checkout.exactDeviceRequired"));
         return;
       }
       if (orderedLinesRef.current.some((line) => line.unitId === unit.id)) {
-        setAddState({ error: `Device number ${unit.serialNo} is already in this cart.` });
+        fail(t("checkout.deviceAlreadyInCart", { serial: unit.serialNo }));
         return;
       }
     } else {
       const existing = orderedLinesRef.current.find((line) => line.productId === product.id && !line.unitId);
       if (existing) {
         if (existing.quantity >= product.onHand) {
-          setAddState({ error: `Only ${product.onHand} × ${product.name} are in stock.` });
+          fail(t("checkout.onlyInStock", { count: product.onHand, product: product.name }));
           return;
         }
         const next = orderedLinesRef.current.map((line) => line.id === existing.id
           ? { ...line, quantity: line.quantity + 1 }
           : line);
         setLineOrder(next);
-        setAddState({ ok: "Item added to the draft cart." });
+        setAddState({ ok: t("checkout.productQuantityAdded", {
+          product: product.name,
+          count: existing.quantity + 1,
+        }) });
+        if (source === "scan") {
+          markScannedLine(existing.id, existing.quantity, product.name);
+        }
         return;
       }
       if (product.onHand <= 0) {
-        setAddState({ error: `${product.name} is out of stock.` });
+        fail(t("checkout.productOutOfStock", { product: product.name }));
         return;
       }
     }
 
     const listUnitPrice = unit?.listUnitPrice ?? product.listUnitPrice;
+    const lineId = crypto.randomUUID();
     const next = [...orderedLinesRef.current, {
-      id: crypto.randomUUID(),
+      id: lineId,
       productId: product.id,
       unitId: unit?.id ?? null,
       productName: product.name,
@@ -783,8 +929,21 @@ export function CheckoutWorkspace({
       warrantyDays: unit?.warrantyDays ?? null,
     } satisfies CheckoutLine];
     setLineOrder(next);
-    setAddState({ ok: "Item added to the draft cart." });
-  };
+    setAddState({ ok: t("checkout.productAdded", { product: product.name }) });
+    if (source === "scan") {
+      markScannedLine(lineId, null, product.name);
+    }
+  }, [markScannedLine, playScanTone, products, setLineOrder, t, units]);
+
+  const handlePageScan = useCallback(
+    (identifier: string) => addLocalItem({ identifier }, "scan"),
+    [addLocalItem],
+  );
+
+  useCheckoutScanner({
+    disabled: checkingOut || clearingTradeIn || confirmingCheckout || confirmingTradeInRemoval || creatingCustomer,
+    onScan: handlePageScan,
+  });
 
   const submitLocalItem = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -793,8 +952,26 @@ export function CheckoutWorkspace({
       identifier: String(data.get("identifier") ?? ""),
       productId: String(data.get("productId") ?? "") || undefined,
       unitId: String(data.get("unitId") ?? "") || undefined,
-    });
+    }, data.get("addSource") === "scan" ? "scan" : "manual");
     event.currentTarget.reset();
+  };
+
+  const undoLastScan = () => {
+    if (!lastScannedLine) return;
+    const next = lastScannedLine.previousQuantity === null
+      ? orderedLinesRef.current.filter((line) => line.id !== lastScannedLine.lineId)
+      : orderedLinesRef.current.map((line) => line.id === lastScannedLine.lineId
+          ? { ...line, quantity: lastScannedLine.previousQuantity ?? line.quantity }
+          : line);
+    setLineOrder(next.map((line, position) => ({ ...line, position })));
+    setInvalidLineIds((current) => {
+      const updated = new Set(current);
+      if (lastScannedLine.previousQuantity === null) updated.delete(lastScannedLine.lineId);
+      return updated;
+    });
+    setHighlightedLineId(null);
+    setAddState({ ok: t("checkout.scanUndone", { product: lastScannedLine.productName }) });
+    setLastScannedLine(null);
   };
 
   const updateLocalLine = (lineId: string, patch: Pick<CheckoutLine, "quantity" | "actualUnitPrice">) => {
@@ -808,9 +985,10 @@ export function CheckoutWorkspace({
     setInvalidLineIds((current) => {
       const next = new Set(current); next.delete(lineId); return next;
     });
+    if (lastScannedLine?.lineId === lineId) setLastScannedLine(null);
   };
 
-  const moveLine = (itemId: string, targetId: string): CheckoutLine[] => {
+  const moveLine = useCallback((itemId: string, targetId: string): CheckoutLine[] => {
     const current = orderedLinesRef.current;
     const from = current.findIndex((line) => line.id === itemId);
     const to = current.findIndex((line) => line.id === targetId);
@@ -834,9 +1012,9 @@ export function CheckoutWorkspace({
     next.splice(to, 0, moved);
     setLineOrder(next);
     return next;
-  };
+  }, [setLineOrder]);
 
-  const lineAtPointer = (clientY: number): string | null => {
+  const lineAtPointer = useCallback((clientY: number): string | null => {
     const container = cartLinesRef.current;
     if (!container) return null;
     const elements = [
@@ -855,27 +1033,67 @@ export function CheckoutWorkspace({
       top += element.offsetHeight;
     }
     return elements.at(-1)?.dataset.cartLineId ?? null;
-  };
+  }, []);
 
-  const saveLineOrder = (next: CheckoutLine[]) => {
-    setLineOrder(next.map((line, position) => ({ ...line, position })));
-    setReorderState({});
-  };
+  const saveLineOrder = useCallback((next: CheckoutLine[], movedLineId: string) => {
+    const positioned = next.map((line, position) => ({ ...line, position }));
+    setLineOrder(positioned);
+    const position = positioned.findIndex((line) => line.id === movedLineId) + 1;
+    setReorderState(position > 0
+      ? { ok: t("checkout.movedPosition", { position, count: positioned.length }) }
+      : {});
+  }, [setLineOrder, t]);
+
+  const finishLineDrag = useCallback(() => {
+    const activeId = draggingIdRef.current;
+    if (!activeId) return;
+    draggingIdRef.current = null;
+    setDraggingId(null);
+    if (dragMovedRef.current) {
+      saveLineOrder(orderedLinesRef.current, activeId);
+    }
+    dragMovedRef.current = false;
+  }, [saveLineOrder]);
+
+  useEffect(() => {
+    const move = (event: PointerEvent) => {
+      const activeId = draggingIdRef.current;
+      if (!activeId) return;
+      event.preventDefault();
+      const target = lineAtPointer(event.clientY);
+      if (!target) return;
+      const before = orderedLinesRef.current;
+      const next = moveLine(activeId, target);
+      if (next !== before) dragMovedRef.current = true;
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", finishLineDrag, true);
+    window.addEventListener("pointercancel", finishLineDrag, true);
+    window.addEventListener("blur", finishLineDrag);
+    return () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", finishLineDrag, true);
+      window.removeEventListener("pointercancel", finishLineDrag, true);
+      window.removeEventListener("blur", finishLineDrag);
+    };
+  }, [finishLineDrag, lineAtPointer, moveLine]);
 
   const moveLineByKeyboard = (itemId: string, direction: -1 | 1) => {
     const current = orderedLinesRef.current;
     const index = current.findIndex((line) => line.id === itemId);
     const target = current[index + direction];
     if (index < 0 || !target) return;
-    saveLineOrder(moveLine(itemId, target.id));
+    saveLineOrder(moveLine(itemId, target.id), itemId);
   };
 
   return (
+    <div>
     <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(20rem,.65fr)]">
       <section>
         <Card className="mb-4 p-4">
           <p className="eyebrow mb-4">{t("checkout.addItems")}</p>
           <form ref={scannerFormRef} onSubmit={submitLocalItem}>
+            <input type="hidden" name="addSource" value="scan" />
             <Field
               label={
                 <HelpTerm description={t("term.trackingHelp")}>
@@ -886,20 +1104,34 @@ export function CheckoutWorkspace({
             >
               <ScannerInput
                 name="identifier"
-                autoFocus
                 autoComplete="off"
+                deduplicate={false}
+                className="h-10"
                 defaultValue={initialIdentifier}
                 placeholder={t("checkout.scanPlaceholder")}
                 onScan={() => scannerFormRef.current?.requestSubmit()}
               />
             </Field>
-            <Button className="mt-3" type="submit">
+            <Button className="mt-3 h-10" type="submit">
               {t("checkout.addScanned")}
             </Button>
           </form>
-          <div className="my-4 border-t border-rule" />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Message state={addState} />
+            {lastScannedLine && (
+              <Button type="button" variant="ghost" className="gap-1.5" onClick={undoLastScan}>
+                <Undo2 aria-hidden="true" className="size-4" />
+                {t("checkout.undoLastScan")}
+              </Button>
+            )}
+          </div>
+          <details className="mt-4 rounded-[3px] border border-rule bg-plate/20">
+            <summary className="cursor-pointer px-3 py-2.5 text-[13px] font-medium">
+              {t("checkout.addManually")}
+            </summary>
+          <div className="grid gap-4 border-t border-rule p-3 sm:grid-cols-2">
             <form onSubmit={submitLocalItem}>
+              <input type="hidden" name="addSource" value="manual" />
               <Field
                 label={t("checkout.bulkProduct")}
                 hint={t("checkout.manualAlternative")}
@@ -911,6 +1143,7 @@ export function CheckoutWorkspace({
               </Button>
             </form>
             <form onSubmit={submitLocalItem}>
+              <input type="hidden" name="addSource" value="manual" />
               <Field
                 label={t("checkout.serialItem")}
                 hint={t("checkout.chooseExact")}
@@ -922,21 +1155,26 @@ export function CheckoutWorkspace({
               </Button>
             </form>
           </div>
-          <Message state={addState} />
+          </details>
         </Card>
 
         <Card>
           <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-3">
-            <p className="eyebrow">
-              {t("checkout.cart", {
+            <div>
+              <p className="eyebrow">
+                {t("checkout.cart", {
                 count: orderedLines.length,
                 kind: t(
                   orderedLines.length === 1
                     ? "checkout.line"
                     : "checkout.lines",
                 ),
-              })}
-            </p>
+                })}
+              </p>
+              <p className="mt-1 text-[11px] text-graphite">
+                {t("checkout.cartUnits", { count: totalUnits })}
+              </p>
+            </div>
             <DiscardDraftControl
               cartId={cart.id}
               itemCount={orderedLines.length}
@@ -950,11 +1188,14 @@ export function CheckoutWorkspace({
             </p>
           ) : (
             <div ref={cartLinesRef}>
-              {orderedLines.map((line) => (
+              {orderedLines.map((line, lineIndex) => (
                 <CartLineEditor
                   key={line.id}
                   line={line}
                   dragging={draggingId === line.id}
+                  highlighted={highlightedLineId === line.id}
+                  position={lineIndex + 1}
+                  lineCount={orderedLines.length}
                   dragDisabled={
                     orderedLines.length < 2
                   }
@@ -971,43 +1212,14 @@ export function CheckoutWorkspace({
                     }),
                     title: t("checkout.dragToReorder"),
                     onPointerDown: (event) => {
-                      if (
-                        orderedLines.length < 2 ||
-                        event.button !== 0 ||
-                        (event.target as HTMLElement).closest(
-                          "input, button, select, textarea, a, label",
-                        )
-                      )
+                      if (orderedLines.length < 2 || event.button !== 0)
                         return;
                       event.preventDefault();
                       event.currentTarget.focus();
-                      event.currentTarget.setPointerCapture(event.pointerId);
                       draggingIdRef.current = line.id;
+                      dragMovedRef.current = false;
                       setDraggingId(line.id);
                       setReorderState({});
-                    },
-                    onPointerMove: (event) => {
-                      const activeId = draggingIdRef.current;
-                      if (!activeId) return;
-                      const target = lineAtPointer(event.clientY);
-                      if (target) moveLine(activeId, target);
-                    },
-                    onPointerUp: (event) => {
-                      if (!draggingIdRef.current) return;
-                      if (
-                        event.currentTarget.hasPointerCapture(event.pointerId)
-                      ) {
-                        event.currentTarget.releasePointerCapture(
-                          event.pointerId,
-                        );
-                      }
-                      draggingIdRef.current = null;
-                      setDraggingId(null);
-                      saveLineOrder(orderedLinesRef.current);
-                    },
-                    onPointerCancel: () => {
-                      draggingIdRef.current = null;
-                      setDraggingId(null);
                     },
                     onKeyDown: (event) => {
                       if (
@@ -1029,7 +1241,7 @@ export function CheckoutWorkspace({
             </div>
           )}
           {(reorderState.error || reorderState.ok) && (
-            <div className="border-t border-rule px-4 pb-3">
+            <div className="border-t border-ok/20 bg-ok/5 px-4 pb-3">
               <Message state={reorderState} />
             </div>
           )}
@@ -1037,7 +1249,7 @@ export function CheckoutWorkspace({
       </section>
 
       <aside>
-        <form action={completeAction}>
+        <form id="checkout-form" action={completeAction}>
           <input type="hidden" name="cartId" value={cart.id} />
           <input type="hidden" name="idempotencyKey" value={checkoutKey} />
           <input type="hidden" name="localCartLines" value={JSON.stringify(orderedLines.map((line) => ({
@@ -1056,17 +1268,29 @@ export function CheckoutWorkspace({
                   <option value="EMI">{t("checkout.shopManagedEmi")}</option>
                 </Select>
               </Field>
-              <Field
-                label={t("common.customer")}
-                hint={t("checkout.customerHint")}
-                error={regularErrors.customerId ? message(regularErrors.customerId) : undefined}
-              >
+              <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className="eyebrow">{t("common.customer")}</span>
+                  <button
+                    type="button"
+                    onClick={() => setCreatingCustomer(true)}
+                    className="inline-flex min-h-10 items-center gap-1.5 rounded-[3px] px-2 text-[12px] font-medium text-signal transition-colors hover:bg-signal-wash"
+                  >
+                    <UserPlus aria-hidden="true" className="size-4" />
+                    {t("checkout.newCustomer")}
+                  </button>
+                </div>
                 <CustomerCombobox
                   customers={customers}
                   value={selectedCustomerId}
                   onChange={chooseCustomer}
                 />
-              </Field>
+                <p className={`mt-1 text-[12px] ${regularErrors.customerId ? "text-out" : "text-graphite"}`}>
+                  {regularErrors.customerId
+                    ? message(regularErrors.customerId)
+                    : t("checkout.customerHint")}
+                </p>
+              </div>
               {isEmi && (
                 <div className="rounded-[3px] border border-blue-300 bg-blue-50/60 p-3">
                   <p className="mb-3 text-[13px] font-semibold">{t("checkout.emiPlan")}</p>
@@ -1195,19 +1419,32 @@ export function CheckoutWorkspace({
               </Field>
             </div>
 
-            <div className="my-5 border-t border-rule" />
-            <dl className="space-y-2 text-[13px]">
-              <div className="flex justify-between">
-                <dt>{t("checkout.listSubtotal")}</dt>
-                <dd className="tnum">{formatBDT(subtotal)}</dd>
+            <div className="mt-5" />
+            <div className="overflow-hidden rounded-[10px] border border-signal/20 bg-card/85 shadow-2xl shadow-signal/20 backdrop-blur">
+            <div className="border-b border-signal/15 bg-gradient-to-r from-signal/10 via-blue-600/10 to-teal-600/10 px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className="inline-flex size-8 items-center justify-center rounded-[7px] border border-signal/15 bg-card/70 text-signal shadow-md shadow-signal/15 backdrop-blur">
+                  <ReceiptText aria-hidden="true" className="size-4" />
+                </span>
+                <div>
+                  <p className="text-[13px] font-semibold tracking-tight text-ink">{t("checkout.saleSummary")}</p>
+                  <p className="text-[11px] text-graphite">{t("checkout.mobileCartSummary", { count: totalUnits })}</p>
+                </div>
               </div>
-              <div className="flex justify-between">
+            </div>
+            <div className="bg-gradient-to-b from-card/75 to-plate/30 p-3.5">
+            <dl className="space-y-2 text-[13px]">
+              <div className="flex justify-between text-graphite">
+                <dt>{t("checkout.listSubtotal")}</dt>
+                <dd className="tnum font-medium text-ink">{formatBDT(subtotal)}</dd>
+              </div>
+              <div className="flex justify-between text-graphite">
                 <dt>{t("checkout.priceAdjustment")}</dt>
                 <dd className={`tnum font-medium ${priceAdjustment > 0 ? "text-ok" : priceAdjustment < 0 ? "text-out" : "text-graphite"}`}>
                   {priceAdjustment > 0 ? "+" : ""}{formatBDT(priceAdjustment)}
                 </dd>
               </div>
-              <div className="flex justify-between border-t border-rule pt-2 text-[16px] font-semibold">
+              <div className="mt-3 flex items-center justify-between rounded-[8px] border border-signal/25 bg-signal/5 px-3 py-3 text-[17px] font-semibold text-signal shadow-md shadow-signal/10">
                 <dt>{isEmi ? t("emi.total") : t("common.total")}</dt>
                 <dd className="tnum">{formatBDT(total)}</dd>
               </div>
@@ -1217,7 +1454,7 @@ export function CheckoutWorkspace({
                     <dt>{t("checkout.tradeInCredit")}</dt>
                     <dd className="tnum">−{formatBDT(tradeInCredit)}</dd>
                   </div>
-                  {!isEmi && <div className="flex justify-between border-t border-rule pt-2 text-[16px] font-semibold">
+                  {!isEmi && <div className="mt-3 flex items-center justify-between rounded-[8px] border border-teal-700/20 bg-teal-700/5 px-3 py-3 text-[16px] font-semibold text-teal-700 shadow-md shadow-teal-700/10">
                     <dt>{t("checkout.amountDue")}</dt>
                     <dd className="tnum">{formatBDT(amountDue)}</dd>
                   </div>}
@@ -1234,16 +1471,17 @@ export function CheckoutWorkspace({
                   <dt>{t("checkout.downPayment")}</dt><dd className="tnum">−{formatBDT(downPayment)}</dd>
                 </div>
               )}
-              {isEmi && (
-                <div className="flex justify-between border-t border-rule pt-2 text-[16px] font-semibold">
+              {hasEmiBalanceAdjustment && (
+                <div className="mt-3 flex items-center justify-between rounded-[8px] border border-teal-700/20 bg-teal-700/5 px-3 py-3 text-[16px] font-semibold text-teal-700 shadow-md shadow-teal-700/10">
                   <dt>{t("checkout.financedBalance")}</dt><dd className="tnum">{formatBDT(amountDue)}</dd>
                 </div>
               )}
             </dl>
 
-            <div className="mt-5 grid gap-2">
+            <div className="mt-4 grid gap-2">
               <Button
                 type="button"
+                className="h-11 w-full rounded-[8px] bg-gradient-to-r from-signal to-blue-700 shadow-lg shadow-signal/25 hover:from-signal/90 hover:to-blue-700/90"
                 onClick={requestCheckoutConfirmation}
                 disabled={
                   checkingOut ||
@@ -1266,9 +1504,8 @@ export function CheckoutWorkspace({
             <Message
               state={checkoutState}
             />
-            <p className="mt-3 text-[11px] text-graphite">
-              {t("checkout.transactionHelp")}
-            </p>
+            </div>
+            </div>
 
             {confirmingTradeInRemoval && cart.tradeInDraft && (
               <div
@@ -1356,7 +1593,9 @@ export function CheckoutWorkspace({
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[16px] font-semibold">{isEmi ? "EMI INVOICE" : "INVOICE"}</p>
+                          <p className="text-[16px] font-semibold">
+                            {isEmi ? t("checkout.emiInvoice") : t("checkout.invoice")}
+                          </p>
                           <p className="mt-1 text-[11px] text-graphite">{t("checkout.invoiceNumberAfterSale")}</p>
                         </div>
                       </header>
@@ -1366,14 +1605,29 @@ export function CheckoutWorkspace({
                           <p className="eyebrow">{t("common.customer")}</p>
                           <p className="mt-1 font-semibold">{selectedCustomer?.name ?? t("checkout.walkIn")}</p>
                           {selectedCustomer?.phone && <p className="tnum text-graphite">{selectedCustomer.phone}</p>}
+                          {isEmi && identificationNumber && (
+                            <p className="mt-1 text-graphite">
+                              {identificationLabel}: <span className="tnum">{identificationNumber}</span>
+                            </p>
+                          )}
                         </div>
                         <div className="sm:text-right">
-                          <p className="eyebrow">{t("checkout.paymentMethod")}</p>
+                          <p className="eyebrow">
+                            {isEmi ? t("checkout.downPaymentMethod") : t("checkout.paymentMethod")}
+                          </p>
                           <p className="mt-1 font-semibold">
                             {!isEmi && paymentStatus === "UNPAID"
                               ? domainLabel(t, paymentStatus)
                               : `${domainLabel(t, paymentMethod)} · ${isEmi ? t("checkout.emiPlan") : domainLabel(t, paymentStatus)}`}
                           </p>
+                          {isEmi && (
+                            <p className="mt-1 text-graphite">
+                              {t("checkout.previewEmiTerm", { count: emiTerm })}
+                              {emiFirstDueDate
+                                ? ` · ${t("checkout.firstInstallmentDate")}: ${previewDate(emiFirstDueDate, locale)}`
+                                : ""}
+                            </p>
+                          )}
                           {reference && <p className="text-graphite">{t("common.reference")}: {reference}</p>}
                         </div>
                       </section>
@@ -1463,21 +1717,21 @@ export function CheckoutWorkspace({
                         )}
                         {isEmi && (
                           <>
-                            <div className="flex justify-between gap-4">
+                            {downPayment > 0 && <div className="flex justify-between gap-4">
                               <span>{t("checkout.optionalDownPayment")}</span>
                               <span className="tnum">{formatBDT(downPayment)}</span>
-                            </div>
-                            <div className="flex justify-between gap-4 font-semibold">
+                            </div>}
+                            {hasEmiBalanceAdjustment && <div className="flex justify-between gap-4 font-semibold">
                               <span>{t("checkout.financedBalance")}</span>
                               <span className="tnum">{formatBDT(amountDue)}</span>
-                            </div>
+                            </div>}
                             <p className="text-right text-[11px] text-graphite">
-                              {t("checkout.previewEmiTerm", { count: emiTerm })}{emiFirstDueDate ? ` · ${previewDate(emiFirstDueDate)}` : ""}
+                              {t("checkout.previewEmiTerm", { count: emiTerm })}{emiFirstDueDate ? ` · ${previewDate(emiFirstDueDate, locale)}` : ""}
                             </p>
                           </>
                         )}
                         {!isEmi && tradeInCredit > 0 && (
-                          <div className="flex justify-between gap-4 font-semibold">
+                          <div className="flex justify-between gap-4 rounded-[6px] border border-teal-700/20 bg-teal-700/5 px-2.5 py-2 font-semibold text-teal-700">
                             <span>{t("checkout.previewAmountDue")}</span>
                             <span className="tnum">{formatBDT(amountDue)}</span>
                           </div>
@@ -1520,15 +1774,41 @@ export function CheckoutWorkspace({
           </Card>
         </form>
 
-        <details className="mt-4 rounded-[3px] border border-rule bg-card">
-          <summary className="cursor-pointer px-4 py-3 text-[13px] font-medium">
-            {t("checkout.newCustomer")}
-          </summary>
-          <div className="border-t border-rule p-4">
-            <CreateCustomerForm onCreated={chooseCustomer} stacked />
-          </div>
-        </details>
       </aside>
+    </div>
+
+    {creatingCustomer && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) setCreatingCustomer(false);
+        }}
+      >
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-customer-title"
+          className="w-full max-w-md rounded-[3px] border border-rule bg-card p-5 shadow-xl"
+        >
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <h2 id="create-customer-title" className="text-[17px] font-semibold">
+              {t("checkout.newCustomer")}
+            </h2>
+            <Button type="button" variant="ghost" onClick={() => setCreatingCustomer(false)} autoFocus>
+              {t("common.close")}
+            </Button>
+          </div>
+          <CreateCustomerForm
+            onCreated={(customerId) => {
+              chooseCustomer(customerId);
+              setCreatingCustomer(false);
+              router.refresh();
+            }}
+            stacked
+          />
+        </div>
+      </div>
+    )}
     </div>
   );
 }

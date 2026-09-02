@@ -7,6 +7,7 @@ import { formatBDT } from '@/lib/money';
 import type { DashboardDTO, DashboardPeriodMetrics } from '@/services/dashboard';
 
 type KpiTone = 'units' | 'low' | 'stock' | 'margin' | 'marginLoss' | 'revenue' | 'cogs' | 'internalUse' | 'profit' | 'profitLoss' | 'neutral';
+type ChangePreference = 'higher-better' | 'lower-better';
 const TONES: Record<KpiTone, { border: string; wash: string; value: string; note: string }> = {
   units: { border: 'border-t-metric-units', wash: 'bg-metric-units-wash', value: 'text-metric-units', note: 'text-graphite' },
   low: { border: 'border-t-metric-low', wash: 'bg-metric-low-wash', value: 'text-metric-low', note: 'text-metric-low' },
@@ -21,19 +22,23 @@ const TONES: Record<KpiTone, { border: string; wash: string; value: string; note
   neutral: { border: 'border-t-metric-neutral', wash: 'bg-metric-neutral-wash', value: 'text-metric-neutral', note: 'text-metric-neutral' },
 };
 
-function percentage(current: number, previous: number) {
-  if (previous === 0) return 0;
-  return ((current - previous) / Math.abs(previous)) * 100;
+function comparisonChange(current: number, previous: number) {
+  if (previous === 0) {
+    return { delta: current, percentage: current === 0 ? 0 : null };
+  }
+  return { delta: current - previous, percentage: ((current - previous) / Math.abs(previous)) * 100 };
 }
 
-function Kpi({ label, value, note, tone, current, previous }: {
+function Kpi({ label, value, note, tone, current, previous, changePreference = 'higher-better' }: {
   label: React.ReactNode; value: React.ReactNode; note?: string; tone: KpiTone;
-  current?: number; previous?: number;
+  current?: number; previous?: number; changePreference?: ChangePreference;
 }) {
   const { t } = useI18n();
   const { period } = useDashboardPeriod();
   const colors = TONES[tone];
-  const change = current === undefined || previous === undefined ? undefined : percentage(current, previous);
+  const change = current === undefined || previous === undefined
+    ? undefined
+    : comparisonChange(current, previous);
   const comparison = t(period === 'day'
     ? 'dashboard.vsYesterday'
     : period === 'week'
@@ -48,8 +53,14 @@ function Kpi({ label, value, note, tone, current, previous }: {
             <div className={`tnum min-w-0 text-[18px] font-semibold ${colors.value}`}>{value}</div>
             {change !== undefined && (
               <div className="shrink-0 text-right leading-tight">
-                <div className={`tnum text-[13px] font-bold ${change === 0 ? 'text-graphite' : change > 0 ? 'text-ok' : 'text-out'}`}>
-                  {change > 0 ? '+' : ''}{change.toFixed(1)}%
+                <div className={`tnum text-[13px] font-bold ${change.delta === 0
+                  ? 'text-graphite'
+                  : (changePreference === 'higher-better' ? change.delta > 0 : change.delta < 0)
+                    ? 'text-ok'
+                    : 'text-out'}`}>
+                  {change.percentage === null
+                    ? t('dashboard.fromZero')
+                    : `${change.percentage > 0 ? '+' : ''}${change.percentage.toFixed(1)}%`}
                 </div>
                 <div className="mt-0.5 text-[9px] font-bold text-ink">{comparison}</div>
               </div>
@@ -66,11 +77,11 @@ function financialCards(metrics: DashboardPeriodMetrics, previous: DashboardPeri
   return (
     <>
       <Kpi tone="revenue" label={t('dashboard.revenue')} value={formatBDT(metrics.revenue)} note={t('dashboard.revenueHelp')} current={metrics.revenue} previous={previous.revenue} />
-      <Kpi tone="cogs" label={<HelpTerm description={t('term.cogsHelp')}>{t('dashboard.cogs')}</HelpTerm>} value={formatBDT(metrics.cogs)} note={t('dashboard.cogsHelp')} current={metrics.cogs} previous={previous.cogs} />
+      <Kpi tone="cogs" label={<HelpTerm description={t('term.cogsHelp')}>{t('dashboard.cogs')}</HelpTerm>} value={formatBDT(metrics.cogs)} note={t('dashboard.cogsHelp')} current={metrics.cogs} previous={previous.cogs} changePreference="lower-better" />
       <Kpi tone={metrics.grossProfit < 0 ? 'profitLoss' : metrics.grossProfit === 0 ? 'neutral' : 'profit'} label={<HelpTerm description={t('term.salesProfitHelp')}>{t('dashboard.salesProfit')}</HelpTerm>} value={formatBDT(metrics.grossProfit)} note={metrics.grossProfit < 0 ? t('dashboard.lossPeriod') : metrics.grossProfit === 0 ? t('dashboard.breakEvenPeriod') : t('dashboard.salesProfitHelp')} current={metrics.grossProfit} previous={previous.grossProfit} />
-      <Kpi tone="cogs" label={t('dashboard.operatingExpenses')} value={formatBDT(metrics.operatingExpenses)} note={t('dashboard.operatingExpensesHelp')} current={metrics.operatingExpenses} previous={previous.operatingExpenses} />
-      <Kpi tone="profitLoss" label={t('dashboard.inventoryLoss')} value={formatBDT(metrics.shrinkage)} note={t('dashboard.inventoryLossHelp')} current={metrics.shrinkage} previous={previous.shrinkage} />
-      <Kpi tone="internalUse" label={t('dashboard.internalUse')} value={formatBDT(metrics.internalUseCost)} note={t('dashboard.internalUseHelp')} current={metrics.internalUseCost} previous={previous.internalUseCost} />
+      <Kpi tone="cogs" label={t('dashboard.operatingExpenses')} value={formatBDT(metrics.operatingExpenses)} note={t('dashboard.operatingExpensesHelp')} current={metrics.operatingExpenses} previous={previous.operatingExpenses} changePreference="lower-better" />
+      <Kpi tone="profitLoss" label={t('dashboard.inventoryLoss')} value={formatBDT(metrics.shrinkage)} note={t('dashboard.inventoryLossHelp')} current={metrics.shrinkage} previous={previous.shrinkage} changePreference="lower-better" />
+      <Kpi tone="internalUse" label={t('dashboard.internalUse')} value={formatBDT(metrics.internalUseCost)} note={t('dashboard.internalUseHelp')} current={metrics.internalUseCost} previous={previous.internalUseCost} changePreference="lower-better" />
       <Kpi tone={metrics.operatingProfit < 0 ? 'profitLoss' : metrics.operatingProfit === 0 ? 'neutral' : 'profit'} label={t('dashboard.operatingProfit')} value={formatBDT(metrics.operatingProfit)} note={t('dashboard.operatingProfitHelp')} current={metrics.operatingProfit} previous={previous.operatingProfit} />
     </>
   );

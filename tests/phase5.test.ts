@@ -106,6 +106,14 @@ describe('Phase 5 calculations', () => {
     }
   });
 
+  it('exposes every service report through the report-tab UI', () => {
+    const page = readFileSync(resolve(process.cwd(), 'src/app/(dashboard)/reports/page.tsx'), 'utf8');
+    expect(page).toContain('REPORT_KINDS.map');
+    for (const report of ['valuation', 'sales', 'profit', 'purchases', 'aging', 'shrinkage', 'movements']) {
+      expect(page).toContain(`${report}: 'reports.${report}'`);
+    }
+  });
+
   it('uses the same ordered cells for CSV and PDF export input', async () => {
     const report = await getReport({ report: 'profit' }, { now, repositories: repositories() });
     const matrix = reportExportMatrix(report);

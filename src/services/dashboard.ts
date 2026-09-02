@@ -244,11 +244,18 @@ export async function getDashboard(
 
   const cutoff60 = new Date(now.getTime() - 60 * DAY_MS);
   const recentOutboundByProduct = new Map<string, StockMovement[]>();
+  const firstInboundByProduct = new Map<string, StockMovement>();
   for (const movement of movements) {
     if (movement.quantity < 0 && isEffectiveOperation(movement)) {
       const list = recentOutboundByProduct.get(movement.productId) ?? [];
       list.push(movement);
       recentOutboundByProduct.set(movement.productId, list);
+    }
+    if (movement.quantity > 0 && isEffectiveOperation(movement)) {
+      const first = firstInboundByProduct.get(movement.productId);
+      if (!first || movement.createdAt < first.createdAt) {
+        firstInboundByProduct.set(movement.productId, movement);
+      }
     }
   }
 
@@ -259,13 +266,17 @@ export async function getDashboard(
         b.createdAt.localeCompare(a.createdAt),
       )[0];
       const lastOutAt = latest?.createdAt ?? null;
-      const inactiveDays = lastOutAt
-        ? Math.floor((now.getTime() - new Date(lastOutAt).getTime()) / DAY_MS)
-        : null;
+      const inactivityStartedAt = lastOutAt
+        ?? firstInboundByProduct.get(product.id)?.createdAt
+        ?? product.createdAt;
+      const inactiveDays = Math.max(0, Math.floor(
+        (now.getTime() - new Date(inactivityStartedAt).getTime()) / DAY_MS,
+      ));
       return { ...row(product), lastOutAt, inactiveDays };
     })
-    .filter((item) => item.lastOutAt === null || new Date(item.lastOutAt) <= cutoff60)
-    .sort((a, b) => (b.inactiveDays ?? Number.MAX_SAFE_INTEGER) - (a.inactiveDays ?? Number.MAX_SAFE_INTEGER));
+    .filter((item) => item.inactiveDays >= 60
+      && (item.lastOutAt === null || new Date(item.lastOutAt) <= cutoff60))
+    .sort((a, b) => b.inactiveDays - a.inactiveDays);
 
   const activityRows = [...movements]
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
@@ -321,7 +332,8 @@ export async function getDashboard(
       .filter((product) => (onHand.get(product.id) ?? 0) > 0 || (counts.get(product.id) ?? 0) > 0)
       .map((product): MoverRow => ({ ...row(product), movedUnits: counts.get(product.id) ?? 0 }));
     return [period, {
-      top: [...rows].sort((a, b) => b.movedUnits - a.movedUnits).slice(0, 5),
+      top: [...rows].filter((item) => item.movedUnits > 0)
+        .sort((a, b) => b.movedUnits - a.movedUnits).slice(0, 5),
       slow: [...rows].filter((item) => item.onHand > 0)
         .sort((a, b) => a.movedUnits - b.movedUnits || b.onHand - a.onHand).slice(0, 5),
     }];
@@ -372,7 +384,7 @@ export async function getDashboard(
     distinctSkus: activeProducts.filter((product) => (onHand.get(product.id) ?? 0) > 0).length,
     lowStockCount: lowStock.length,
     outOfStockCount: outOfStock.length,
-    lowStock: [...lowStock, ...outOfStock.map(row)].slice(0, 10),
+    lowStock: [...outOfStock.map(row), ...lowStock].slice(0, 10),
     deadStock: deadStock.slice(0, 10),
     recentActivity,
     recentActivityByPeriod,
@@ -424,7 +436,7 @@ export async function getDashboard(
     from: expenseQueryStart,
     to: now,
     status: 'ACTIVE',
-  });
+  }, null);
   const monthExpenses = periodExpenses.filter((expense) => new Date(expense.expenseDate) >= monthStart);
   const monthOperatingExpenses = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
   const monthShrinkage = movements
@@ -488,10 +500,14 @@ export async function getDashboard(
   })) as Record<DashboardPeriodKey, DashboardPeriodComparison>;
 
   const rangeStart = new Date(`${financialDayKeys[0]}T00:00:00+06:00`);
+  const refurbishmentExpenses = await repositories.refurbishmentExpenses.findAll();
   const stockValueDeltaByDay = new Map(financialDayKeys.map((date) => [date, 0]));
   let runningStockValue = movements
     .filter((movement) => new Date(movement.createdAt) < rangeStart)
     .reduce((sum, movement) => sum + movement.quantity * movement.unitCost, 0);
+  runningStockValue += refurbishmentExpenses
+    .filter((expense) => new Date(expense.createdAt) < rangeStart)
+    .reduce((sum, expense) => sum + expense.amount, 0);
   for (const movement of movements) {
     const key = dhakaDateKey(new Date(movement.createdAt));
     if (stockValueDeltaByDay.has(key)) {
@@ -499,6 +515,12 @@ export async function getDashboard(
         key,
         stockValueDeltaByDay.get(key)! + movement.quantity * movement.unitCost,
       );
+    }
+  }
+  for (const expense of refurbishmentExpenses) {
+    const key = dhakaDateKey(new Date(expense.createdAt));
+    if (stockValueDeltaByDay.has(key)) {
+      stockValueDeltaByDay.set(key, stockValueDeltaByDay.get(key)! + expense.amount);
     }
   }
   const dailyFinancials = financialDayKeys.map((date): DailyFinancialPoint => {

@@ -37,10 +37,14 @@ describe('regular invoice collections and trade-in payouts', () => {
 
   it('records excess trade-in credit as a separate cash payout', () => {
     const checkout = source('src/services/checkout.ts');
+    const migration = source('prisma/migrations/20260901133000_allow_excess_trade_in_credit/migration.sql');
     expect(checkout).toContain('tradeInCashPayout');
     expect(checkout).toContain("type: 'TRADE_IN_PAYOUT'");
     expect(checkout).toContain("nextReceiptNumber('TRADE_IN_PAYOUT'");
     expect(checkout).toContain('tradeInPayoutMethod');
+    expect(migration).toContain('DROP CONSTRAINT IF EXISTS "sales_tradeInCredit_check"');
+    expect(migration).toContain('CHECK ("tradeInCredit" >= 0)');
+    expect(migration).not.toContain('"tradeInCredit" <= "total"');
   });
 
   it('keeps audit receipt numbers internal and only shows type for mixed payout histories', () => {

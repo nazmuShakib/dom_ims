@@ -150,6 +150,7 @@ export function CommandPalette() {
 
       {open && (
         <div
+          data-scanner-blocking="true"
           className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 p-2 pt-[7vh] sm:p-4 sm:pt-[10vh]"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) setOpen(false);

@@ -20,8 +20,22 @@ describe('Phase 7 scanner workflow', () => {
 
   it('submits the checkout add-item form when a scanner sends Enter', () => {
     const checkout = source('src/components/checkout/CheckoutWorkspace.tsx');
+    const pageScanner = source('src/components/checkout/useCheckoutScanner.ts');
     expect(checkout).toContain('ref={scannerFormRef} onSubmit={submitLocalItem}');
     expect(checkout).toContain('onScan={() => scannerFormRef.current?.requestSubmit()}');
+    expect(checkout).toContain('useCheckoutScanner({');
+    expect(checkout).toContain('deduplicate={false}');
+    expect(checkout).toContain("toLocaleLowerCase('en-US')");
+    expect(checkout).not.toContain('checkout.scanAnywhereReady');
+    expect(checkout).not.toContain('checkout.scanAnywhereHint');
+    expect(checkout).toContain('playScanTone(true)');
+    expect(checkout).toContain('role="status" aria-live="polite"');
+    expect(pageScanner).toContain("event.key === 'F9'");
+    expect(pageScanner).toContain('editable && !current.prefixed');
+    expect(pageScanner).toContain('hasBlockingOverlay()');
+    expect(pageScanner).toContain('[data-scanner-blocking="true"]');
+    expect(pageScanner).toContain("window.addEventListener('keydown', handleKeyDown, true)");
+    expect(pageScanner).toContain("document.addEventListener('visibilitychange', reset)");
   });
 
   it('appends scanned receipt identifiers without querying or duplicating units', () => {

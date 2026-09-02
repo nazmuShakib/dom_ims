@@ -6,9 +6,11 @@ import { MonoInput } from '@/components/ui';
 export const ScannerInput = forwardRef<HTMLInputElement, Omit<ComponentProps<typeof MonoInput>, 'onKeyDown' | 'onChange'> & {
   onScan?: (value: string) => void;
   onValueChange?: (value: string) => void;
+  deduplicate?: boolean;
 }>(function ScannerInput({
   onScan,
   onValueChange,
+  deduplicate = true,
   ...props
 }, forwardedRef) {
   const last = useRef<{ value: string; at: number } | null>(null);
@@ -21,10 +23,11 @@ export const ScannerInput = forwardRef<HTMLInputElement, Omit<ComponentProps<typ
       onKeyDown={(event) => {
         if (event.key !== 'Enter') return;
         event.preventDefault();
+        event.stopPropagation();
         const value = event.currentTarget.value.trim();
         if (!value) return;
         const now = Date.now();
-        if (last.current?.value === value && now - last.current.at < 750) {
+        if (deduplicate && last.current?.value === value && now - last.current.at < 750) {
           return;
         }
         last.current = { value, at: now };

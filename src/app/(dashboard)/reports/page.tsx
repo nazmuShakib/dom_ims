@@ -10,6 +10,7 @@ import {
   getReport,
   getReportActorIds,
   parseReportFilters,
+  REPORT_KINDS,
   type ReportCell,
   type ReportColumn,
   type ReportKind,
@@ -17,14 +18,17 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-const REPORTS: Array<{ id: ReportKind; label: MessageKey }> = [
-  { id: 'valuation', label: 'reports.valuation' },
-  { id: 'sales', label: 'reports.sales' },
-  { id: 'profit', label: 'reports.profit' },
-  { id: 'aging', label: 'reports.aging' },
-  { id: 'shrinkage', label: 'reports.shrinkage' },
-  { id: 'movements', label: 'reports.movements' },
-];
+const REPORT_LABEL_KEYS: Record<ReportKind, MessageKey> = {
+  valuation: 'reports.valuation',
+  sales: 'reports.sales',
+  profit: 'reports.profit',
+  purchases: 'reports.purchases',
+  aging: 'reports.aging',
+  shrinkage: 'reports.shrinkage',
+  movements: 'reports.movements',
+};
+
+const REPORTS = REPORT_KINDS.map((id) => ({ id, label: REPORT_LABEL_KEYS[id] }));
 
 type Translator = ReturnType<typeof createTranslator>;
 

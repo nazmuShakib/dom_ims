@@ -30,6 +30,7 @@ import type {
   EmiPayment,
   EmiPaymentAllocation,
   EmiEarlySettlement,
+  AuditLog,
 } from '@/domain/types';
 import { prisma } from '@/lib/prisma';
 import type { Paisa } from '@/lib/money';
@@ -176,6 +177,10 @@ function saleItem(row: Awaited<ReturnType<Client['saleItem']['findUniqueOrThrow'
 
 function saleSettlement(row: Awaited<ReturnType<Client['saleSettlement']['findUniqueOrThrow']>>): SaleSettlement {
   return { ...row, recordedAt: iso(row.recordedAt), createdAt: iso(row.createdAt) };
+}
+
+function auditLog(row: Awaited<ReturnType<Client['auditLog']['findUniqueOrThrow']>>): AuditLog {
+  return { ...row, createdAt: iso(row.createdAt) };
 }
 
 const emiContract = (row: Awaited<ReturnType<Client['emiContract']['findUniqueOrThrow']>>): EmiContract => ({
@@ -343,6 +348,28 @@ function createRepositories(client: Client, transact?: Repositories['transaction
         try {
           return user(await client.user.create({ data }));
         } catch (error) { return friendlyDatabaseError(error); }
+      },
+    },
+    auditLogs: {
+      async findByEntity(entity, entityId) {
+        return (await client.auditLog.findMany({
+          where: { entity, entityId },
+          orderBy: { createdAt: 'asc' },
+        })).map(auditLog);
+      },
+      async create(value) {
+        return auditLog(await client.auditLog.create({
+          data: {
+            ...value,
+            before: value.before == null
+              ? Prisma.DbNull
+              : JSON.parse(JSON.stringify(value.before)) as Prisma.InputJsonValue,
+            after: value.after == null
+              ? Prisma.DbNull
+              : JSON.parse(JSON.stringify(value.after)) as Prisma.InputJsonValue,
+            createdAt: new Date(value.createdAt),
+          },
+        }));
       },
     },
     products: {
@@ -665,6 +692,13 @@ function createRepositories(client: Client, transact?: Repositories['transaction
         const row = await client.cartDraft.findUnique({ where: { id } });
         return row ? cartDraft(row) : null;
       },
+      async findByIdForUpdate(id) {
+        const rows = await client.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`SELECT "id" FROM "cart_drafts" WHERE "id" = ${id} FOR UPDATE`,
+        );
+        if (rows.length === 0) return null;
+        return cartDraft(await client.cartDraft.findUniqueOrThrow({ where: { id } }));
+      },
       async create(value) {
         return cartDraft(await client.cartDraft.create({
           data: {
@@ -913,6 +947,11 @@ function createRepositories(client: Client, transact?: Repositories['transaction
       },
     },
     refurbishmentExpenses: {
+      async findAll() {
+        return (await client.refurbishmentExpense.findMany({
+          orderBy: { createdAt: 'asc' },
+        })).map(refurbishmentExpense);
+      },
       async findByUnit(unitId) {
         return (await client.refurbishmentExpense.findMany({
           where: { unitId },
@@ -1050,7 +1089,7 @@ function createRepositories(client: Client, transact?: Repositories['transaction
             } : {}),
           },
           orderBy,
-          take: Math.max(1, Math.min(limit, 2_000)),
+          take: limit === null ? undefined : Math.max(1, Math.min(limit, 2_000)),
         })).map(operatingExpense);
       },
       async findById(id) {
@@ -1151,8 +1190,11 @@ function createRepositories(client: Client, transact?: Repositories['transaction
 
 export const prismaRepositories = createRepositories(
   prisma as PrismaClient,
-  (fn) => prisma.$transaction(
+  (fn, options) => prisma.$transaction(
     (tx) => fn(createRepositories(tx)),
-    { maxWait: 5_000, timeout: 15_000 },
+    {
+      maxWait: options?.maxWait ?? 5_000,
+      timeout: options?.timeout ?? 15_000,
+    },
   ),
 );

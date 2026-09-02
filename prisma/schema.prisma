@@ -691,6 +691,7 @@ model Sale {
   id             String     @id @default(uuid(7))
   invoiceNumber  String     @unique
   idempotencyKey String     @unique
+  checkoutCartId String?    @unique
   status         SaleStatus @default(COMPLETED)
 
   customerId String?
